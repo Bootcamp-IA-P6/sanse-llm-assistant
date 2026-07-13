@@ -45,6 +45,39 @@ El RAG resuelve esto: divide los documentos en fragmentos pequeños (chunks), lo
 | **Número de resultados recuperados (top-k)** | Pocos (2-3) vs. varios (5+) | Con un modelo pequeño y contexto limitado, conviene empezar con pocos y ampliar solo si falta información |
 | **Persistencia de ChromaDB** | En memoria (se pierde al reiniciar) vs. persistida en disco | Persistida, para no tener que re-generar embeddings cada vez que se reinicia el sistema durante el desarrollo |
 
+## Hallazgo importante: la búsqueda semántica pura no es fiable con estos datos
+
+Al probar el retriever con preguntas de ejemplo (tarea 3.6), se detectó que
+el chunk con la respuesta correcta a veces queda en último lugar del
+ranking, incluso pidiendo todos los chunks disponibles. Las puntuaciones
+de similitud mostraron la causa: los documentos ficticios comparten
+cabeceras institucionales casi idénticas ("Departamento: Desarrollo Local
+y Empleo", "Periodo: Enero - Abril 2026"), que en textos tan cortos pesan
+más en el embedding que el contenido específico de cada uno — el modelo
+de embeddings no logra diferenciar bien entre los chunks por esta razón.
+
+**Solución adoptada:** combinar la búsqueda semántica con un filtro exacto
+por la metadata `tipo` (calculada de forma determinista en el loader,
+Fase 1). El Agente Redactor (Fase 4) nunca debe buscar en toda la base
+vectorial sin filtro — cada consulta debe ir acotada al `tipo` de
+documento correspondiente a la sección que se esté redactando.
+
+```python
+vectorstore.similarity_search_with_score(
+    pregunta, k=2, filter={"tipo": "financiero"}
+)
+```
+
+Este hallazgo sigue el mismo patrón de diseño ya validado en la Fase 2:
+no confiar en que el modelo (o, en este caso, el embedding) resuelva algo
+que el código ya puede resolver con certeza.
+
+**Pendiente de confirmar con datos reales:** por confirmar si esta
+limitación se atenúa con documentos reales más largos y con contenido más
+distintivo entre sí. El filtro por `tipo` se mantiene de todas formas,
+independientemente del resultado, por ser más rápido y más fiable que
+depender solo del embedding.
+
 ---
 
 ## Evaluación (versión ligera, no el framework completo de métricas)

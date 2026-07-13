@@ -21,6 +21,7 @@ config/local.yaml
 
 # Datos
 data/raw/*
+data/chroma_db/
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
