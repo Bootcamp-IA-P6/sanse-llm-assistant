@@ -62,3 +62,41 @@ def validar_cifras_financieras(texto_generado: str, partidas: list[dict]) -> lis
             )
 
     return incidencias
+
+
+def _porcentaje_a_valor(pct_texto: str) -> float:
+    """Convierte un porcentaje en texto a numero, aceptando coma o punto como
+    separador decimal (ej. '77,14%' o '77.14%'), para poder comparar por
+    valor y no por formato literal - necesario porque el ingles usa punto
+    y el espanol usa coma para lo mismo."""
+    numero = pct_texto.replace("%", "").replace(" ", "").replace(",", ".")
+    return float(numero)
+
+
+def detectar_cifras_no_verificadas(texto_generado: str, contexto: str) -> list[str]:
+    """Detecta porcentajes mencionados en el texto generado que NO aparecen
+    en el contexto original. Estas cifras son, por definicion, calculos que
+    el modelo hizo por su cuenta (ver Hallazgo 2.8/agencia de colocacion:
+    el modelo inventa porcentajes de crecimiento que no estaban en los
+    datos, y a veces invierte la direccion del cambio).
+
+    Compara por VALOR numerico, no por texto literal, para funcionar igual
+    en espanol (coma decimal) y en ingles (punto decimal).
+
+    No sustituye a validar_cifras_financieras(): esa compara cifras que
+    SI deberian estar, contra el valor correcto. Esta detecta cifras que
+    no deberian estar en absoluto si no vienen ya resueltas en el contexto.
+    """
+    incidencias = []
+    patron = r"\d+(?:[.,]\d+)?\s*%"
+    porcentajes_generados = re.findall(patron, texto_generado)
+    valores_contexto = {_porcentaje_a_valor(p) for p in re.findall(patron, contexto)}
+
+    for pct in porcentajes_generados:
+        valor = _porcentaje_a_valor(pct)
+        if valor not in valores_contexto:
+            incidencias.append(
+                f"Cifra no verificada: el texto menciona '{pct.strip()}' pero ese "
+                f"porcentaje no aparece en los datos originales - revisar manualmente."
+            )
+    return incidencias
