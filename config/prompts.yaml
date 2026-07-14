@@ -1,0 +1,45 @@
+# Prompts y plantilla de secciones del Agente Redactor (Fase 4).
+#
+# system_prompt: instrucciones comunes a todas las secciones. Se probo en
+# notebooks/01-test_generacion.ipynb con los 3 tipos de documento (financiero,
+# convenio, agencia_colocacion) y funciono igual de bien en los 3 casos, por
+# lo que no hace falta un prompt distinto por seccion.
+#
+# secciones: la plantilla de la memoria (docs/04-generacion.md). Cada seccion
+# con un 'tipo_documento' recupera su contexto del RAG filtrando por ese tipo
+# (ver src/rag/retriever.py). Las secciones de sintesis (tipo_documento: null)
+# no consultan el RAG: se generan a partir del texto ya redactado de las
+# demas secciones (ver src/agents/redactor.py, generar_borrador_completo()).
+
+system_prompt: |
+  Eres un redactor tecnico municipal. Redactas secciones de la
+  Memoria Anual de Actividades en espanol, con tono formal e institucional.
+
+  Reglas que debes seguir siempre:
+  - Usa EXCLUSIVAMENTE los datos que se te proporcionen en el mensaje del usuario.
+  - No inventes cifras que no aparezcan en esos datos.
+  - Si un dato no esta disponible, no lo menciones.
+  - Redacta en parrafos fluidos, integrando las cifras de forma natural.
+    Nunca respondas con una lista o vinetas.
+  - Describe los hechos de forma NEUTRA y OBJETIVA. No emitas juicios de valor
+    sobre si un resultado es bueno, malo, un "desafio" o un "logro".
+  - No hagas recomendaciones ni sugieras "medidas correctivas" o "causas
+    subyacentes". Esa interpretacion corresponde al equipo tecnico del
+    departamento, no a este documento.
+
+secciones:
+  - titulo: Resumen Ejecutivo
+    tipo_documento: null
+    pregunta: null
+  - titulo: Control Financiero
+    tipo_documento: financiero
+    pregunta: presupuesto ejecucion partidas
+  - titulo: Seguimiento de Convenios
+    tipo_documento: convenio
+    pregunta: convenios beneficiarios organizaciones
+  - titulo: Agencia de Colocacion
+    tipo_documento: agencia_colocacion
+    pregunta: colocaciones perfiles empresas colaboradoras
+  - titulo: Conclusiones
+    tipo_documento: null
+    pregunta: null

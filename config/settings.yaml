@@ -1,0 +1,13 @@
+# Ajustes del Agente Redactor y del pipeline RAG (Fase 3 y Fase 4).
+# Ver src/config.py para el loader y src/agents/redactor.py para su uso.
+
+llm:
+  modelo: llama3.2:3b
+  temperature: 0.3
+
+rag:
+  modelo_embeddings: nomic-embed-text
+  persist_directory: data/chroma_db
+  collection_name: memoria_ayuntamiento
+  k: 2
+  data_raw_directory: data/raw
