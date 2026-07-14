@@ -41,15 +41,17 @@ def _plantilla(system_prompt: str) -> ChatPromptTemplate:
 def generar_seccion(
     titulo_seccion: str,
     contexto: str,
+    idioma: str = "es",
     modelo: str = "llama3.2:3b",
     temperature: float = 0.3,
 ) -> str:
-    """Genera el texto de una sección de la memoria.
+    """Genera el texto de una sección de la memoria, en español o en inglés.
 
     NOTA IMPORTANTE (ver docs/02-validacion_modelo.md): el system prompt
     reduce, pero no elimina, el riesgo de que el modelo editorialice o
     cometa errores aritmeticos. Por eso el resultado de esta funcion NUNCA
-    debe usarse sin pasar despues por el Revisor.
+    debe usarse sin pasar despues por el Revisor. En ingles, ademas, la
+    fluidez es notablemente peor que en espanol (ver tarea 2.6).
     """
     system_prompt = cargar_prompts()["system_prompt"]
     llm = ChatOllama(model=modelo, temperature=temperature)
