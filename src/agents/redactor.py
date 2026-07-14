@@ -31,10 +31,35 @@ from src.rag.retriever import contexto_como_texto, recuperar_contexto
 from src.validation.revisor import validar_cifras_financieras, validar_cifras_generales
 
 
-def _plantilla(system_prompt: str) -> ChatPromptTemplate:
+IDIOMAS_VALIDOS = {"es", "en"}
+
+SYSTEM_PROMPT_EN = """You are a municipal technical writer. You write sections of the Annual Activity Report in English, with a formal, institutional tone.
+
+Rules you must always follow:
+- Use EXCLUSIVELY the data provided to you in the user's message.
+- Do not invent figures that do not appear in that data.
+- If a piece of data is not available, do not mention it.
+- Write in flowing paragraphs, integrating the figures naturally.
+  Never respond with a list or bullet points.
+- Describe the facts in a NEUTRAL and OBJECTIVE way. Do not make value
+  judgments about whether a result is good, bad, a "challenge," or an
+  "achievement."
+- Do not make recommendations or suggest "corrective measures" or
+  "underlying causes." That interpretation belongs to the department's
+  technical team, not to this document.
+- Limit yourself to describing what happened with the data provided,
+  without adding conclusions that are not explicitly stated in it."""
+
+_HUMAN_TEMPLATE = {
+    "es": 'Redacta la sección "{titulo_seccion}" de la memoria, usando estos datos:\n\n{contexto}',
+    "en": 'Write the "{titulo_seccion}" section of the report, using this data:\n\n{contexto}',
+}
+
+
+def _plantilla(system_prompt: str, idioma: str) -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([
         ("system", system_prompt),
-        ("human", 'Redacta la sección "{titulo_seccion}" de la memoria, usando estos datos:\n\n{contexto}'),
+        ("human", _HUMAN_TEMPLATE[idioma]),
     ])
 
 
@@ -53,9 +78,14 @@ def generar_seccion(
     debe usarse sin pasar despues por el Revisor. En ingles, ademas, la
     fluidez es notablemente peor que en espanol (ver tarea 2.6).
     """
-    system_prompt = cargar_prompts()["system_prompt"]
+    if idioma not in IDIOMAS_VALIDOS:
+        raise ValueError(
+            f"idioma debe ser uno de {IDIOMAS_VALIDOS}, se recibio '{idioma}'"
+        )
+
+    system_prompt = cargar_prompts()["system_prompt"] if idioma == "es" else SYSTEM_PROMPT_EN
     llm = ChatOllama(model=modelo, temperature=temperature)
-    prompt = _plantilla(system_prompt).invoke({"titulo_seccion": titulo_seccion, "contexto": contexto})
+    prompt = _plantilla(system_prompt, idioma).invoke({"titulo_seccion": titulo_seccion, "contexto": contexto})
     respuesta = llm.invoke(prompt)
     return respuesta.content
 
