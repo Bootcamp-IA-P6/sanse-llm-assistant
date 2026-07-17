@@ -125,16 +125,47 @@ def extraer_docx(ruta: Path) -> list[BloqueContenido]:
 
 from openpyxl import load_workbook
 
+def _propagar_celdas_fusionadas(ws, filas: list) -> list:
+    """Copia el valor de cada celda fusionada a TODAS las celdas que ocupa
+    visualmente. openpyxl solo guarda el valor en la celda superior-
+    izquierda del rango fusionado; el resto llegan vacias (None), lo que
+    rompe la relacion entre una cabecera de grupo (ej. un titulo que cubre
+    varias columnas) y las columnas que describe.
+
+    No es una suposicion: ws.merged_cells.ranges indica con exactitud que
+    celdas estan fusionadas y donde vive su valor real (arreglo del 16 de
+    julio de 2026, tras detectar el problema con los Excel reales)."""
+    for rango in ws.merged_cells.ranges:
+        valor = ws.cell(row=rango.min_row, column=rango.min_col).value
+        for r in range(rango.min_row, rango.max_row + 1):
+            idx_fila = r - ws.min_row
+            if not (0 <= idx_fila < len(filas)):
+                continue
+            for c in range(rango.min_col, rango.max_col + 1):
+                idx_col = c - ws.min_column
+                if 0 <= idx_col < len(filas[idx_fila]):
+                    filas[idx_fila][idx_col] = valor
+    return filas
+
+
 def extraer_xlsx(ruta: Path) -> list[BloqueContenido]:
-    """Extrae cada hoja de un Excel como un bloque de tipo 'tabla'."""
-    wb = load_workbook(ruta, read_only=True, data_only=True)
+    """Extrae cada hoja de un Excel como un bloque de tipo 'tabla', en
+    formato de matriz cruda (sin asumir cual fila es la cabecera). La
+    etiqueta del bloque es el nombre de la propia hoja.
+
+    NOTA: se carga SIN read_only=True porque ese modo no da acceso a
+    ws.merged_cells - y sin esa informacion no se puede reconstruir
+    correctamente una cabecera de grupo (un titulo que fusiona varias
+    columnas, ej. 'INDICADORES INFORME MENSUAL SEPE' cubriendo 8 columnas
+    en el Excel real de indicadores). El coste en memoria es asumible
+    para el tamano de archivo actual (varias decenas de KB)."""
+    wb = load_workbook(ruta, data_only=True)
     bloques = []
     for nombre_hoja in wb.sheetnames:
         ws = wb[nombre_hoja]
-        filas = [
-            list(fila) for fila in ws.iter_rows(values_only=True)
-            if any(celda is not None for celda in fila)
-        ]
+        filas = [list(fila) for fila in ws.iter_rows(values_only=True)]
+        filas = _propagar_celdas_fusionadas(ws, filas)
+        filas = [f for f in filas if any(c is not None for c in f)]
         if not filas:
             continue
         bloques.append(BloqueContenido(
