@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path.cwd().parent))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -78,6 +78,26 @@ def _es_titulo(parrafo) -> bool:
         return False
     return bool(parrafo.runs[0].bold) and len(parrafo.text) < 100
 
+def _forward_fill_columna_agrupadora(tabla_filas: list[list[str]], indice_columna: int = 0) -> list[list[str]]:
+    """Rellena celdas vacias de UNA columna concreta con el ultimo valor no
+    vacio visto por encima, para reconstruir la columna de agrupacion
+    (ej. MES) cuando una tabla de Word la deja en blanco por continuidad
+    en vez de repetir el valor, como si hiciera Excel con una fusion real.
+    No toca ninguna otra columna: una celda vacia en cualquier otra
+    posicion es un dato ausente genuino, no una continuacion, y se deja
+    tal cual (verificado contra filas TOTAL y datos faltantes reales)."""
+    ultimo_valor = None
+    filas_corregidas = []
+    for fila in tabla_filas:
+        fila = list(fila)
+        valor_actual = fila[indice_columna].strip() if fila[indice_columna] else ""
+        if valor_actual:
+            ultimo_valor = valor_actual
+        elif ultimo_valor is not None:
+            fila[indice_columna] = ultimo_valor
+        filas_corregidas.append(fila)
+    return filas_corregidas
+
 def extraer_docx(ruta: Path) -> list[BloqueContenido]:
     """Extrae parrafos y tablas de un Word, en su orden real."""
     doc = Document(ruta)
@@ -108,6 +128,7 @@ def extraer_docx(ruta: Path) -> list[BloqueContenido]:
         else:  # Table
             volcar_buffer()
             filas = [[celda.text for celda in fila.cells] for fila in item.rows]
+            filas = _forward_fill_columna_agrupadora(filas, indice_columna=0)
             bloques.append(BloqueContenido(
                 tipo_bloque="tabla",
                 contenido=filas,
@@ -130,11 +151,7 @@ def _propagar_celdas_fusionadas(ws, filas: list) -> list:
     visualmente. openpyxl solo guarda el valor en la celda superior-
     izquierda del rango fusionado; el resto llegan vacias (None), lo que
     rompe la relacion entre una cabecera de grupo (ej. un titulo que cubre
-    varias columnas) y las columnas que describe.
-
-    No es una suposicion: ws.merged_cells.ranges indica con exactitud que
-    celdas estan fusionadas y donde vive su valor real (arreglo del 16 de
-    julio de 2026, tras detectar el problema con los Excel reales)."""
+    varias columnas) y las columnas que describe."""
     for rango in ws.merged_cells.ranges:
         valor = ws.cell(row=rango.min_row, column=rango.min_col).value
         for r in range(rango.min_row, rango.max_row + 1):
@@ -147,18 +164,15 @@ def _propagar_celdas_fusionadas(ws, filas: list) -> list:
                     filas[idx_fila][idx_col] = valor
     return filas
 
-
 def extraer_xlsx(ruta: Path) -> list[BloqueContenido]:
     """Extrae cada hoja de un Excel como un bloque de tipo 'tabla', en
-    formato de matriz cruda (sin asumir cual fila es la cabecera). La
-    etiqueta del bloque es el nombre de la propia hoja.
+    formato de matriz cruda (sin asumir cual fila es la cabecera).
 
     NOTA: se carga SIN read_only=True porque ese modo no da acceso a
     ws.merged_cells - y sin esa informacion no se puede reconstruir
     correctamente una cabecera de grupo (un titulo que fusiona varias
-    columnas, ej. 'INDICADORES INFORME MENSUAL SEPE' cubriendo 8 columnas
-    en el Excel real de indicadores). El coste en memoria es asumible
-    para el tamano de archivo actual (varias decenas de KB)."""
+    columnas). El coste en memoria es asumible para el tamano de
+    archivo actual."""
     wb = load_workbook(ruta, data_only=True)
     bloques = []
     for nombre_hoja in wb.sheetnames:
