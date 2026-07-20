@@ -39,4 +39,5 @@ class EstadoPipeline(TypedDict, total=False):
     analysis: Analisis
     draft: str
     review: RevisionResultado
+    draft_en: str
     final_document: str
