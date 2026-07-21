@@ -38,14 +38,15 @@ class TraduccionInforme(BaseModel):
 
 def agente_adaptador_en(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: traduce state['draft'] al ingles y devuelve
-    state['draft_en']. Reintenta hasta 3 veces si falla la llamada
-    estructurada a Groq (fallo intermitente conocido)."""
-    revision = estado.get("review")
-    if revision is not None and not revision.valido:
-        return {"draft_en": ""}
+    state['draft_en']. Ya NO bloquea la traduccion si review.valido es
+    False -- el Revisor puede dar falsos positivos con contenido
+    narrativo largo (parrafos que el Redactor parafrasea por diseño,
+    no cifras cortas). Bloquear aqui ocultaba el borrador sin que
+    ninguna persona lo viera. Las incidencias siguen disponibles en
+    state['review'] para revision humana junto al documento final."""
 
     modelo = ChatGroq(
-        model=os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b"),
+        model=os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b"),
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.2,
     )
