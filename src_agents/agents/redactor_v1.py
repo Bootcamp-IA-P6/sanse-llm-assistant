@@ -50,15 +50,62 @@ def _formatear_contexto(datos) -> str:
     return "\n".join(f"- {d.concepto}: {d.valor} (fuente: {d.fuente})" for d in datos)
 
 
+# Groq limita el modelo llama-3.3-70b-versatile a 12000 tokens/minuto en el
+# tier gratuito. ~8000 caracteres (~2000 tokens) por bloque deja margen
+# de sobra para el prompt de sistema y la respuesta antes de chocar con
+# ese limite (error 413), sin necesidad de descartar ningun dato: si no
+# caben en un bloque, se reparten en varios.
+_MAX_BLOQUE_CHARS = 8000
+
+
+def _partir_datos_en_bloques(datos, max_chars: int = _MAX_BLOQUE_CHARS) -> list[list]:
+    """Agrupa los datos del analista en bloques que quepan holgadamente bajo
+    el limite de tokens por request de Groq, sin descartar ningun dato."""
+    bloques: list[list] = []
+    bloque_actual: list = []
+    longitud_actual = 0
+
+    for dato in datos:
+        longitud_dato = len(f"- {dato.concepto}: {dato.valor} (fuente: {dato.fuente})")
+        if bloque_actual and longitud_actual + longitud_dato > max_chars:
+            bloques.append(bloque_actual)
+            bloque_actual = []
+            longitud_actual = 0
+        bloque_actual.append(dato)
+        longitud_actual += longitud_dato + 1
+
+    if bloque_actual:
+        bloques.append(bloque_actual)
+
+    return bloques
+
+
 def agente_redactor(estado: EstadoPipeline) -> dict:
-    """Nodo de LangGraph: redacta el informe a partir de state['analysis']."""
+    """Nodo de LangGraph: redacta el informe a partir de state['analysis'].
+
+    Si los datos no caben en una sola llamada dentro del limite de tokens
+    por minuto de Groq, se reparten en varios bloques y se redacta un
+    parrafo por bloque (mismo prompt, mismas reglas), en vez de truncar
+    datos y perder cifras del informe final.
+    """
     modelo = ChatGroq(
         model=os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b"),
+        #model="llama-3.3-70b-versatile",
+        #model="llama-3.1-8b-instant",
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.3,
+        max_tokens=1500,
     )
     analisis = estado["analysis"]
-    contexto = _formatear_contexto(analisis.datos)
-    prompt = _plantilla.invoke({"contexto": contexto})
-    respuesta = modelo.invoke(prompt)
-    return {"draft": _limpiar_pensamiento(respuesta.content)}
+    bloques = _partir_datos_en_bloques(analisis.datos)
+
+    parrafos = []
+    for indice, bloque in enumerate(bloques, start=1):
+        if len(bloques) > 1:
+            print(f"[redactor] bloque {indice}/{len(bloques)}...")
+        contexto = _formatear_contexto(bloque)
+        prompt = _plantilla.invoke({"contexto": contexto})
+        respuesta = modelo.invoke(prompt)
+        parrafos.append(_limpiar_pensamiento(respuesta.content))
+
+    return {"draft": "\n\n".join(parrafos)}
