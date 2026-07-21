@@ -16,6 +16,7 @@ import re
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 from src_agents.models.state import EstadoPipeline
 
@@ -38,6 +39,12 @@ _plantilla = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
     ("human", "Redacta el informe usando estos datos:\n\n{contexto}"),
 ])
+
+
+class ParrafoInforme(BaseModel):
+    texto: str = Field(description="El parrafo del informe redactado a partir de" \
+    " los datos proporcionados, en espanol formal e institucional. Solo el texto " \
+    "del informe, sin explicaciones ni razonamiento adicional.")
 
 
 def _limpiar_pensamiento(texto: str) -> str:
@@ -94,8 +101,9 @@ def agente_redactor(estado: EstadoPipeline) -> dict:
         #model="llama-3.1-8b-instant",
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.3,
-        max_tokens=1500,
+        max_tokens=4000,
     )
+    modelo_estructurado = modelo.with_structured_output(ParrafoInforme)
     analisis = estado["analysis"]
     bloques = _partir_datos_en_bloques(analisis.datos)
 
@@ -105,7 +113,18 @@ def agente_redactor(estado: EstadoPipeline) -> dict:
             print(f"[redactor] bloque {indice}/{len(bloques)}...")
         contexto = _formatear_contexto(bloque)
         prompt = _plantilla.invoke({"contexto": contexto})
-        respuesta = modelo.invoke(prompt)
-        parrafos.append(_limpiar_pensamiento(respuesta.content))
+
+        ultimo_error = None
+        for intento in range(3):
+            try:
+                respuesta = modelo_estructurado.invoke(prompt)
+                parrafos.append(respuesta.texto)
+                break
+            except Exception as e:
+                ultimo_error = e
+        else:
+            print(f"[redactor] bloque {indice}: salida estructurada fallo 3 veces, uso metodo de respaldo")
+            respuesta = modelo.invoke(prompt)
+            parrafos.append(_limpiar_pensamiento(respuesta.content))
 
     return {"draft": "\n\n".join(parrafos)}
