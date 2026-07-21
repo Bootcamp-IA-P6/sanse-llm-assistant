@@ -109,7 +109,7 @@ def agente_analista(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: interpreta state["documents"] y devuelve
     state["analysis"]."""
     modelo = ChatGroq(
-        model=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        model=os.environ.get("GROQ_MODEL_ANALISTA", "llama-3.3-70b-versatile"),
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0,
     )
