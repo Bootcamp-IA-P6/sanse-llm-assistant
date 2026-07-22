@@ -1,59 +1,106 @@
 """reviewer.py - Agente Revisor.
 
 Valida que el informe redactado por el Agente Redactor (state["draft"])
-sea fiel a los datos que resolvió el Agente Analista (state["analysis"]):
-comprueba que cada valor de Analisis.datos aparezca, tal cual, en el
-texto del borrador. Devuelve state["review"] (ver RevisionResultado en
-src_agents/models/state.py, que ya define el contrato: valido=True solo
-si todas las cifras del informe coinciden con el Analisis).
+sea fiel a los datos que resolvio el Agente Analista (state["analysis"]).
 
-No es una llamada a un LLM — es una comprobación por código, la misma
-decisión de diseño que ya se tomó en la versión anterior de este
-componente (src_agents/validation/revisor.py): comparar si un texto
-contiene una cifra es una tarea determinista, así que usar otro modelo
-para esto sería más lento, menos fiable (un segundo modelo podría
-cometer el mismo tipo de error que se intenta detectar) y consumiría una
-llamada extra de Groq — algo que conviene evitar dado el límite diario
-de tokens que el equipo ya ha agotado dos veces durante el desarrollo
-(ver docs/02_README_analyst_agent.md y docs/03_README_workflow_graph.md).
+Trata dos tipos de valor de forma distinta, porque no tiene sentido
+exigir la misma precision a los dos:
 
-No sustituye la revisión humana del informe final antes de publicarse.
+- Valores numericos (cifras, porcentajes, codigos cortos): comparacion
+  LITERAL, sin margen. Una cifra alterada es exactamente lo que este
+  agente existe para detectar - aqui no se relaja nada.
+- Valores narrativos largos (texto descriptivo, ej. "LINEAS DE
+  ACTUACION"): el Redactor los parafrasea por diseno, asi que exigir
+  coincidencia literal exacta genera falsos positivos constantes.
+  Se comprueba en su lugar que un porcentaje suficiente de las palabras
+  significativas del valor aparecen en el borrador.
+
+No es una llamada a un LLM - sigue siendo una comprobacion por codigo,
+determinista, sin gastar cuota de Groq.
 """
-
+import re
 import unicodedata
 
 from src_agents.models.state import EstadoPipeline, RevisionResultado
+
+# Umbral de cobertura de palabras para valores narrativos: si al menos
+# este porcentaje de las palabras significativas del valor aparece en
+# el borrador, se considera que el dato SI esta presente (aunque
+# reformulado). Ajustable si en la practica da demasiados o muy pocos
+# falsos positivos.
+_UMBRAL_COBERTURA_NARRATIVA = 0.7
+
+# Un valor se considera "numerico" si, quitando espacios, solo contiene
+# digitos y los separadores/simbolos habituales en cifras (punto y coma
+# de miles/decimales, barra de fechas o proporciones, porcentaje, signo).
+# Ej.: "1.396", "97/100%", "2+1", "0,8229" -> numericos.
+# Ej.: "Educacion Infantil", "4. Ejecucion y difusion..." -> narrativos
+# (llevan letras, aunque empiecen por un numero).
+_PATRON_NUMERICO = re.compile(r"^[\d.,/%+\-\s]+$")
 
 
 def _quitar_acentos(texto: str) -> str:
     """Normaliza acentos para comparar de forma fiable, aunque el
     Redactor escriba con tilde y el dato de origen no la lleve (o al
-    revés)."""
+    reves)."""
     return "".join(
         c for c in unicodedata.normalize("NFD", texto)
         if unicodedata.category(c) != "Mn"
     )
 
 
+def _es_valor_numerico(valor: str) -> bool:
+    """True si el valor es una cifra o dato corto - se compara siempre
+    de forma literal, sin margen."""
+    return bool(_PATRON_NUMERICO.match(valor.strip()))
+
+
+def _aparece_literal(valor_normalizado: str, draft_normalizado: str) -> bool:
+    """Comparacion estricta: el valor debe aparecer tal cual, como
+    subcadena, dentro del borrador."""
+    return valor_normalizado in draft_normalizado
+
+
+def _aparece_narrativo(
+    valor_normalizado: str,
+    draft_normalizado: str,
+    umbral: float = _UMBRAL_COBERTURA_NARRATIVA,
+) -> bool:
+    """Comparacion tolerante para texto largo: en vez de exigir la frase
+    completa tal cual, comprueba que la mayoria de sus palabras
+    significativas (mas de 3 letras, para saltar articulos/preposiciones
+    cortas) aparecen en el borrador. Si el valor no tiene palabras largas
+    (caso raro), cae a la comparacion literal como respaldo."""
+    palabras = [w for w in re.findall(r"\w+", valor_normalizado) if len(w) > 3]
+    if not palabras:
+        return _aparece_literal(valor_normalizado, draft_normalizado)
+    encontradas = sum(1 for palabra in palabras if palabra in draft_normalizado)
+    return (encontradas / len(palabras)) >= umbral
+
+
 def agente_revisor(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: contrasta state['draft'] contra state['analysis']
     y devuelve state['review'].
 
-    Para cada ConceptoValor que resolvió el Analista, busca su 'valor'
-    (sin reinterpretar el número, tal como lo devolvió el Analista) dentro
-    del borrador. Si no aparece, se registra como incidencia — puede
-    significar que el Redactor omitió el dato o que lo reescribió con una
-    cifra distinta (inventada).
+    Para cada ConceptoValor que resolvio el Analista, comprueba si su
+    'valor' esta presente en el borrador - con comparacion literal si es
+    una cifra, o por cobertura de palabras si es texto narrativo largo.
+    Si no aparece, se registra como incidencia.
     """
     draft = estado["draft"]
     analisis = estado["analysis"]
-
     draft_normalizado = _quitar_acentos(draft.lower())
-    incidencias = []
 
+    incidencias = []
     for dato in analisis.datos:
         valor_normalizado = _quitar_acentos(dato.valor.lower())
-        if valor_normalizado not in draft_normalizado:
+
+        if _es_valor_numerico(dato.valor):
+            encontrado = _aparece_literal(valor_normalizado, draft_normalizado)
+        else:
+            encontrado = _aparece_narrativo(valor_normalizado, draft_normalizado)
+
+        if not encontrado:
             incidencias.append(
                 f"'{dato.concepto}' = {dato.valor} (fuente: {dato.fuente}) "
                 f"no aparece en el informe redactado"

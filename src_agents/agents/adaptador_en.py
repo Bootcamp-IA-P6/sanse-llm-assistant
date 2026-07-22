@@ -4,6 +4,7 @@ adaptador_en.py - Adaptador de traduccion al ingles.
 """
 
 import os
+import re
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -35,6 +36,11 @@ _plantilla = ChatPromptTemplate.from_messages([
 class TraduccionInforme(BaseModel):
     texto_traducido: str = Field(description="El texto del informe traducido al ingles, fiel al original, sin nada mas.")
 
+def _limpiar_pensamiento(texto: str) -> str:
+    """Quita el bloque <think>...</think> que algunos modelos de razonamiento
+    incluyen antes de la respuesta final."""
+    return re.sub(r"<think>.*?</think>\s*", "", texto, flags=re.DOTALL).strip()
+
 
 def agente_adaptador_en(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: traduce state['draft'] al ingles y devuelve
@@ -49,6 +55,7 @@ def agente_adaptador_en(estado: EstadoPipeline) -> dict:
         model=os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b"),
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.2,
+        max_tokens=8000,
     )
     modelo_estructurado = modelo.with_structured_output(TraduccionInforme)
     prompt = _plantilla.invoke({"texto": estado["draft"]})
@@ -60,4 +67,7 @@ def agente_adaptador_en(estado: EstadoPipeline) -> dict:
             return {"draft_en": resultado.texto_traducido}
         except Exception as e:
             ultimo_error = e
-    raise ultimo_error
+
+    print(f"[adaptador] salida estructurada fallo 3 veces, uso metodo de respaldo: {ultimo_error}")
+    respuesta = modelo.invoke(prompt)
+    return {"draft_en": _limpiar_pensamiento(respuesta.content)}
