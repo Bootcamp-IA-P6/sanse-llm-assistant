@@ -96,7 +96,7 @@ def agente_redactor(estado: EstadoPipeline) -> dict:
     datos y perder cifras del informe final.
     """
     modelo = ChatGroq(
-        model=os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b"),
+        model=os.environ.get("GROQ_MODEL_REDACTOR", "qwen/qwen3.6-27b"),
         #model="llama-3.3-70b-versatile",
         #model="llama-3.1-8b-instant",
         api_key=os.environ["GROQ_API_KEY"],
