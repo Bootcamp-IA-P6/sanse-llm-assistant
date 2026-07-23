@@ -55,7 +55,8 @@ def agente_adaptador_en(estado: EstadoPipeline) -> dict:
         model=os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b"),
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.2,
-        max_tokens=8000,
+        max_tokens=2000,
+        reasoning_effort="none",
     )
     modelo_estructurado = modelo.with_structured_output(TraduccionInforme)
     prompt = _plantilla.invoke({"texto": estado["draft"]})
