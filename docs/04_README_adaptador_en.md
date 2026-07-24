@@ -1,31 +1,28 @@
 # Adaptador de traducción al inglés — resumen para el equipo
 
-**Rama:** `feature/agent_adaptador_en` (creada desde `dev`, tras el merge de `feature/workflow-graph`)
-**Archivo:** `src_agents/agents/adaptador_en.py` (antes `writer.py`, renombrado)
-**Estado:** fase 1 completa (solo traducción) y probada; fase 2 (tono para el ciudadano) pendiente, a definir con el equipo
-**Issue:** #81
+**Rama original:** `feature/agent_adaptador_en` (issue #81)
+**Actualizaciones posteriores:** `fix/adaptador-reasoning-effort` (issue #90, PR #91) y `fix/adaptador-troceo-tpm` (issue #92, PR #93)
+**Archivo:** `src_agents/agents/adaptador_en.py`
+**Estado:** integrado en el pipeline (`workflow.py`) y probado en producción, con documentos reales por separado y combinados (Word + Excel). Fase 2 (tono para el ciudadano) sigue pendiente, a definir con el equipo.
 
 ## Qué hace
 
-Traduce `state["draft"]` (el informe ya redactado y validado) al inglés. Va al final de la cadena, después del Agente Revisor — solo tiene sentido traducir un informe que ya ha pasado la validación. Comprueba `state["review"].valido` antes de traducir; si el Revisor no lo aprueba, no genera traducción.
+Traduce `state["draft"]` (el informe ya redactado y validado) al inglés, al final de la cadena Ingesta → Analista → Redactor → Revisor → Adaptador. Devuelve el resultado en `draft_en`, dentro de `EstadoPipeline` (`state.py`).
 
-Devuelve el resultado en un campo nuevo, `draft_en`, añadido a `EstadoPipeline` en `state.py`.
+Es fase 1 (solo traducción, sin cambiar el tono). Mar propuso ese orden: primero traducción, validar que funciona y encaja, y decidir después cómo abordar el tono para el ciudadano — eso sigue pendiente.
 
-Es fase 1 (solo traducción, sin cambiar el tono). Mar propuso ese orden: primero traducción, validar que funciona y encaja, y decidir después cómo abordar el tono para el ciudadano.
+## Cómo se ha validado
 
-## Cómo se validó
-
-Probado con un texto de ejemplo (`test_adaptador_manual.py`), no con el pipeline completo todavía (depende de que el Revisor real esté terminado). Cifras verificadas una a una: se mantienen exactas, solo cambia el formato de miles (3.956 → 3,956, convención española a inglesa).
+Ya no se prueba solo con script suelto (`test_adaptador_manual.py`): está conectado al grafo real y se ha probado de extremo a extremo varias veces, con el informe financiero solo, con el Excel de la agencia de empleo solo, y con los dos documentos combinados — en los tres casos genera el informe en inglés correctamente.
 
 ## Decisiones de diseño y problemas encontrados
 
-- **Salida estructurada (Pydantic) en vez de texto libre.** El modelo (`qwen/qwen3.6-27b`) es un modelo de razonamiento y a veces mezcla su proceso de pensamiento con la respuesta final sin usar las etiquetas `<think>` de forma consistente. Forzar salida estructurada evita el problema de raíz.
-- **Reintento (hasta 3 veces).** La llamada a Groq con salida estructurada falla de forma intermitente (`tool_use_failed`) aunque el texto generado sea correcto. Se añadió un reintento simple, igual que hace el Analista.
-- **Reglas explícitas en el prompt** para dos problemas reales encontrados en pruebas: números en formato español (ambiguos en inglés) y emojis, impropios de un informe institucional.
+- **Salida estructurada (Pydantic) en vez de texto libre**, con reintento hasta 3 veces y, si falla, respaldo a una llamada sin estructura seguida de limpieza del `<think>` — necesario porque algunos modelos de razonamiento mezclan su proceso de pensamiento con la respuesta final.
+- **`reasoning_effort="none"` solo quando el modelo es de la familia `qwen`** (issue #90). Al usar modelos de repuesto sin capacidad de razonamiento (como `llama-3.1-8b-instant`), ese parámetro no es compatible y provocaba un error 400 — se hizo condicional a que `"qwen" in modelo_id`.
+- **Troceo del borrador en bloques de ~3.000 caracteres antes de traducir** (issue #92), respetando párrafos completos. Antes se enviaba el borrador entero en una sola petición, lo que superaba el límite de tokens por petición del proveedor (error 413) en documentos largos.
 
 ## Pendiente
 
 - Fase 2: definir y construir el cambio de tono para el ciudadano.
-- Conectar `adaptador_en` al grafo en `workflow.py` (lo hará Mar cuando esté listo).
-- Prueba de integración completa, cuando el Revisor real esté terminado y haya cuota de Groq disponible.
-- No se ha usado notebook para este desarrollo — se ha probado con scripts sueltos, documentado aquí en su lugar.
+- El troceo evita el error 413 (petición demasiado grande) pero no espera entre bloque y bloque — con documentos combinados grandes (ej. Word + Excel), el volumen de peticiones seguidas puede superar el límite de tokens por minuto del modelo y dar un error 429. Detectado hoy (24 julio) en pruebas con Word + Excel juntos. Pendiente: añadir una pequeña pausa entre bloques.
+- Revisar si conviene volver al modelo de producción (`qwen/qwen3.6-27b`) en `GROQ_MODEL_ADAPTADOR` una vez se libere la cuota agotada esta semana, en vez de seguir con el modelo de repuesto.
