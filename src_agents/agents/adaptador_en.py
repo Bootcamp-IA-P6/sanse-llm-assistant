@@ -41,34 +41,75 @@ def _limpiar_pensamiento(texto: str) -> str:
     incluyen antes de la respuesta final."""
     return re.sub(r"<think>.*?</think>\s*", "", texto, flags=re.DOTALL).strip()
 
+_MAX_BLOQUE_CHARS = 3000
+
+
+def _partir_texto_en_bloques(texto: str, max_chars: int = _MAX_BLOQUE_CHARS) -> list[str]:
+    """Agrupa los parrafos del borrador en bloques que quepan holgadamente
+    bajo el limite de tokens por minuto de Groq, sin cortar ningun parrafo
+    a la mitad. Mismo enfoque que ya usa redactor.py con los datos del
+    Analista (ver _partir_datos_en_bloques)."""
+    parrafos = texto.split("\n\n")
+    bloques: list[str] = []
+    bloque_actual: list[str] = []
+    longitud_actual = 0
+
+    for parrafo in parrafos:
+        longitud_parrafo = len(parrafo)
+        if bloque_actual and longitud_actual + longitud_parrafo > max_chars:
+            bloques.append("\n\n".join(bloque_actual))
+            bloque_actual = []
+            longitud_actual = 0
+        bloque_actual.append(parrafo)
+        longitud_actual += longitud_parrafo + 2
+
+    if bloque_actual:
+        bloques.append("\n\n".join(bloque_actual))
+
+    return bloques
+
 
 def agente_adaptador_en(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: traduce state['draft'] al ingles y devuelve
-    state['draft_en']. Ya NO bloquea la traduccion si review.valido es
-    False -- el Revisor puede dar falsos positivos con contenido
-    narrativo largo (parrafos que el Redactor parafrasea por diseño,
-    no cifras cortas). Bloquear aqui ocultaba el borrador sin que
-    ninguna persona lo viera. Las incidencias siguen disponibles en
-    state['review'] para revision humana junto al documento final."""
+    state['draft_en']. Trocea el borrador en bloques (igual que hace
+    redactor.py) para no superar el limite de tokens por minuto de Groq
+    en documentos largos o con varios archivos combinados. Ya NO bloquea
+    la traduccion si review.valido es False -- ver docstring original."""
 
-    modelo = ChatGroq(
-        model=os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b"),
+    modelo_id = os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b")
+    kwargs_modelo = dict(
+        model=modelo_id,
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.2,
         max_tokens=2000,
-        reasoning_effort="none",
     )
+    if "qwen" in modelo_id:
+        # reasoning_effort solo lo soportan los modelos "de razonamiento"
+        # como qwen; con modelos de respaldo (ej. llama-3.1-8b-instant)
+        # Groq da error 400 si se lo pasamos.
+        kwargs_modelo["reasoning_effort"] = "none"
+
+    modelo = ChatGroq(**kwargs_modelo)
     modelo_estructurado = modelo.with_structured_output(TraduccionInforme)
-    prompt = _plantilla.invoke({"texto": estado["draft"]})
+    bloques = _partir_texto_en_bloques(estado["draft"])
 
-    ultimo_error = None
-    for intento in range(3):
-        try:
-            resultado = modelo_estructurado.invoke(prompt)
-            return {"draft_en": resultado.texto_traducido}
-        except Exception as e:
-            ultimo_error = e
+    traducciones = []
+    for indice, bloque in enumerate(bloques, start=1):
+        if len(bloques) > 1:
+            print(f"[adaptador] bloque {indice}/{len(bloques)}...")
+        prompt = _plantilla.invoke({"texto": bloque})
 
-    print(f"[adaptador] salida estructurada fallo 3 veces, uso metodo de respaldo: {ultimo_error}")
-    respuesta = modelo.invoke(prompt)
-    return {"draft_en": _limpiar_pensamiento(respuesta.content)}
+        ultimo_error = None
+        for intento in range(3):
+            try:
+                resultado = modelo_estructurado.invoke(prompt)
+                traducciones.append(resultado.texto_traducido)
+                break
+            except Exception as e:
+                ultimo_error = e
+        else:
+            print(f"[adaptador] bloque {indice}: salida estructurada fallo 3 veces, uso metodo de respaldo: {ultimo_error}")
+            respuesta = modelo.invoke(prompt)
+            traducciones.append(_limpiar_pensamiento(respuesta.content))
+
+    return {"draft_en": "\n\n".join(traducciones)}
