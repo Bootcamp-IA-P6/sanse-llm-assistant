@@ -1,0 +1,41 @@
+# Resumen para el equipo
+
+**Rama:** `fix/report-generator-content` (desde `dev`, ya con PR abierto)
+**Notebook:** `notebooks_agents/09_analyst_narrative_text.ipynb`
+**Estado:** código completo y comitado; pendiente de validar con ejecución completa de los 3 documentos (cortada por cuota de Groq)
+
+## 1. Agente Analista extendido a texto narrativo
+
+Hasta ahora solo procesaba `tipo_bloque == "tabla"`. Se añadió una segunda vía (`PROMPT_TEXTO`, `_parsear_respuesta_texto`) para extraer cifras incrustadas en prosa (ej. *"1.396 personas"* en un párrafo, no en una tabla). Validado: 27 conceptos de un bloque narrativo, `SIN_DATOS` correcto en párrafos sin cifras (firmas, introducciones), 107 conceptos totales combinando tabla + texto en un documento real.
+
+## 2. Generador de informe: versión final decidida
+
+Se probó la síntesis con estructura de 4 secciones (notebook 09), pero se aparcó por problemas recurrentes de cuota con el modelo configurado para esa llamada. **El generador definitivo es la versión estable**: vuelca `state["draft"]` (español) + `state["draft_en"]` (inglés) + las incidencias del Revisor como notas de validación al final, sin ocultarlas.
+
+Además:
+- `NOMBRE_ENTIDAD` sacado a variable de entorno (aviso del equipo sobre no hardcodear el nombre del Ayuntamiento, de cara a open source).
+- **Filtro nuevo:** `_limpiar_fuga_razonamiento` — detectado un caso real donde el método de respaldo del Adaptador dejaba una fuga de razonamiento en inglés (plan de pasos numerado, tipo "1. Analyze User Input:") **sin** las etiquetas `<think>` que sí filtra `adaptador_en.py`. Se corrige aquí, sin tocar el archivo de la compañera.
+
+## 3. Generador conectado como 6º nodo del grafo
+
+`agente_generador_informe` (envoltorio fino, mismo patrón que `agente_ingesta`) ya está en `workflow.py`:
+
+```
+ingesta → analista → redactor → revisor → adaptador → generador → END
+```
+
+No llama a ningún LLM — solo lee campos ya generados por los nodos anteriores y escribe el `.docx`, así que no añade coste de cuota. `state["final_document"]` (existía desde el diseño original, nunca se había rellenado) ya se completa solo.
+
+## Validación pendiente
+
+No se ha logrado una ejecución completa de extremo a extremo con los **3 documentos reales juntos** — el último intento se cortó por límite diario de Groq (`qwen`, 198.547/200.000) en pleno Redactor.
+
+**Dato a tener en cuenta:** con los 3 documentos combinados, el Redactor necesitó **26 bloques** (frente a 8-9 con uno o dos documentos). Es una señal real de que el volumen de llamadas crece rápido a escala completa — relevante para la decisión pendiente sobre clave de pago de Groq antes de la entrega.
+
+Se pide que alguien con cuota disponible confirme el pipeline completo de los 6 nodos antes de fusionar el PR.
+
+## Pendiente / a vigilar
+
+- Ejecución completa de los 3 documentos, sin cortes.
+- `_limpiar_fuga_razonamiento` detecta un patrón concreto visto hoy — si aparece una fuga con otro formato, no la detectaría.
+- Streamlit sigue sin conectar al pipeline nuevo (hallazgo de otra compañera, pendiente de decisión de equipo aparte).
