@@ -3,29 +3,27 @@
 Sintetiza la Memoria Anual siguiendo la estructura fija del ejemplo real
 del Ayuntamiento (Introducción, Análisis por Plan, Actividad Operativa,
 Conclusiones) a partir de state["analysis"] -- NO del draft libre del
-Redactor, que no sigue esta estructura ni respeta el límite de páginas.
+Redactor.
 
-Trocea los datos si no caben en una sola llamada (mismo patrón que
-analyst.py y redactor_v1.py) -- necesario porque el Analista ya cubre
-también texto narrativo, lo que aumenta el volumen de ConceptoValor,
-y porque algunos modelos configurados en GROQ_MODEL_MEMORIA tienen
-cuotas por minuto reducidas (ej. llama-3.1-8b-instant, 6000 TPM).
+La traducción al inglés REUTILIZA agente_adaptador_en, llamado aquí como función directa -- más
+robusto que una implementación propia: reintento con fallback a texto
+libre, limpieza de <think>, y compatible con el cambio de modelo por
+cuota (adaptador_en.py ya sabe quitar reasoning_effort si el modelo no
+es qwen). No se toca adaptador_en.py.
 
-Genera también una versión en inglés, traduciendo la síntesis en
-español ya validada sección por sección (no re-sintetiza desde los
-datos en inglés, para no arriesgar una segunda desviación de cifras).
+agente_adaptador_en se llama 4 veces (una por sección) desde
+traducir_memoria() como función Python normal, NO como nodo de
+LangGraph -- un nodo se ejecuta una vez por turno del grafo, y aquí
+hace falta repetir la llamada con un texto distinto cada vez.
 
-agente_generador_informe: envoltorio de nodo para LangGraph. A
-diferencia de la versión anterior (que leía state["draft"]), este
-nodo lee state["analysis"] directamente -- depende del Analista, no
-del Redactor.
+Trocea los datos de síntesis si no caben en una sola llamada (mismo
+patrón que analyst.py y redactor_v1.py).
 
 PENDIENTE:
 - El documento puede salir en más páginas de las esperadas pese a
-  respetar el presupuesto de palabras -- revisar formato (interlineado,
-  fuente, márgenes) con más calma.
+  respetar el presupuesto de palabras.
 - No probado con los 3 documentos reales juntos en un solo run limpio.
-- Sin plantilla oficial del Ayuntamiento -- formato propio provisional.
+- Sin plantilla oficial del Ayuntamiento.
 """
 
 import os
@@ -36,20 +34,14 @@ from pathlib import Path
 from docx import Document
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
 
+from src_agents.agents.adaptador_en import agente_adaptador_en
 from src_agents.models.state import Analisis, ConceptoValor, EstadoPipeline
 
 NOMBRE_ENTIDAD = os.environ.get("NOMBRE_ENTIDAD", "Ayuntamiento")
 
-# Conservador a propósito: funciona incluso con un modelo de cuota
-# reducida configurado en GROQ_MODEL_MEMORIA (ej. llama-3.1-8b-instant,
-# límite 6000 TPM).
 _MAX_BLOQUE_DATOS_CHARS = 2000
 
-# Fuga de razonamiento sin <think>: un bloque que empieza con un paso
-# numerado en estilo "plan de trabajo" (ej. "1. Analyze User Input:").
-# Detectado en el método de respaldo de otros agentes del proyecto.
 _PATRON_FUGA_RAZONAMIENTO = re.compile(
     r"\n?\d+\.\s*\*{0,2}(Analyze|Process|Draft|Task|Identify|Extract)\b",
     re.IGNORECASE,
@@ -95,25 +87,11 @@ Datos disponibles:
 
 _plantilla_memoria = ChatPromptTemplate.from_messages([("human", PROMPT_MEMORIA)])
 
-PROMPT_TRADUCCION = """You are a professional translator for a Spanish
-municipal government. Translate the following institutional report
-section into English, faithfully. Keep every figure exactly as it
-appears. Keep the same formal tone. Reformat numbers to English
-convention (comma for thousands, period for decimals). Return only
-the translated text, nothing else.
-
-Section: {seccion}"""
-
-_plantilla_traduccion = ChatPromptTemplate.from_messages([("human", PROMPT_TRADUCCION)])
-
-
-class SeccionTraducida(BaseModel):
-    texto: str = Field(description="La sección traducida al inglés, fiel al original, sin nada más.")
-
 
 def _limpiar_fuga_razonamiento(texto: str) -> str:
     """Corta el texto en el primer indicio de fuga de razonamiento sin
-    <think>. Si no encuentra ninguna, devuelve el texto tal cual."""
+    <think> -- red de seguridad extra sobre lo que ya filtra
+    adaptador_en.py, que solo limpia <think>...</think>."""
     match = _PATRON_FUGA_RAZONAMIENTO.search(texto)
     if match:
         return texto[:match.start()].strip()
@@ -126,8 +104,7 @@ def _limpiar_fuga_razonamiento(texto: str) -> str:
 
 def _deduplicar(analisis: Analisis) -> Analisis:
     """Agrupa ConceptoValor por valor único -- el mismo texto largo
-    suele repetirse bajo varios conceptos distintos en tablas reales,
-    inflando el contexto sin aportar información nueva."""
+    suele repetirse bajo varios conceptos distintos en tablas reales."""
     vistos = set()
     datos_dedup = []
     for d in analisis.datos:
@@ -176,8 +153,7 @@ def _quitar_acentos(texto: str) -> str:
 def validar_memoria(secciones: dict, analisis: Analisis, longitud_max: int = 15) -> list[str]:
     """Comprueba que los valores CORTOS (candidatos a cifra puntual) del
     Analista aparezcan en el texto generado. Ignora valores largos
-    (nombres de indicador, párrafos narrativos) -- comparación literal
-    contra ellos produce falsos positivos sistemáticos."""
+    (nombres de indicador, párrafos narrativos)."""
     texto_normalizado = _quitar_acentos(" ".join(secciones.values()).lower())
     incidencias = []
     for dato in analisis.datos:
@@ -238,33 +214,17 @@ def sintetizar_memoria(analisis: Analisis, presupuesto_palabras: int = 600) -> d
 
 
 # --------------------------------------------------------------------
-# Traducción
+# Traducción — reutiliza el Adaptador del equipo, como función directa
 # --------------------------------------------------------------------
 
 def traducir_memoria(secciones: dict) -> dict:
-    """Traduce las 4 secciones ya generadas al inglés, sección por
-    sección. Limpia fugas de razonamiento del mismo modo que la
-    síntesis en español."""
-    modelo = ChatGroq(
-        model=os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b"),
-        api_key=os.environ["GROQ_API_KEY"],
-        temperature=0.2,
-    )
-    modelo_estructurado = modelo.with_structured_output(SeccionTraducida)
-
+    """Traduce las 4 secciones reutilizando agente_adaptador_en. Se
+    llama 4 veces, una por sección -- no es un nodo del grafo, es una
+    función que este módulo invoca directamente."""
     secciones_en = {}
     for clave, texto in secciones.items():
-        prompt = _plantilla_traduccion.invoke({"seccion": texto})
-        ultimo_error = None
-        for _ in range(3):
-            try:
-                resultado = modelo_estructurado.invoke(prompt)
-                secciones_en[clave] = _limpiar_fuga_razonamiento(resultado.texto)
-                break
-            except Exception as e:
-                ultimo_error = e
-        else:
-            secciones_en[clave] = f"[Translation failed: {ultimo_error}]"
+        resultado = agente_adaptador_en({"draft": texto})
+        secciones_en[clave] = _limpiar_fuga_razonamiento(resultado.get("draft_en", ""))
     return secciones_en
 
 
@@ -279,8 +239,9 @@ def _anadir_secciones(doc: Document, secciones: dict, titulos: dict):
 
 
 def generar_memoria_docx(analisis: Analisis, ruta_salida: Path, incluir_ingles: bool = True) -> Path:
-    """Punto de entrada directo: sintetiza, traduce y genera el .docx
-    final, con las incidencias de validación como sección de notas."""
+    """Punto de entrada directo: sintetiza, traduce (reutilizando el
+    Adaptador) y genera el .docx final, con las incidencias de
+    validación como sección de notas."""
     secciones = sintetizar_memoria(analisis)
     incidencias = validar_memoria(secciones, _deduplicar(analisis))
 
@@ -326,8 +287,9 @@ def generar_memoria_docx(analisis: Analisis, ruta_salida: Path, incluir_ingles: 
 
 def agente_generador_informe(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: genera el .docx final a partir de
-    state['analysis'] (no de state['draft']) y devuelve la ruta en
-    state['final_document']."""
+    state['analysis'] y devuelve la ruta en state['final_document'].
+    Internamente llama a agente_adaptador_en como función (no como
+    nodo separado del grafo) para la traducción."""
     ruta_salida = Path(os.environ.get("OUTPUT_DIR", "data/output")) / "memoria_final.docx"
     ruta_salida.parent.mkdir(parents=True, exist_ok=True)
     ruta = generar_memoria_docx(estado["analysis"], ruta_salida)
