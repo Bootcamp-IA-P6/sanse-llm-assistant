@@ -1,234 +1,107 @@
-"""extractor_generico.py - Ingesta generica de documentos."""
+"""report_generator.py - Generador del informe final.
 
+Genera el .docx a partir del estado completo del pipeline: borrador en
+español (state["draft"]), traducción al inglés (state["draft_en"]) y
+las incidencias del Revisor como notas de validación al final -- no se
+ocultan, sigue habiendo supervisión humana antes de publicar.
+
+Requiere haber ejecutado el pipeline completo (o al menos hasta el
+Adaptador) para tener draft y draft_en disponibles.
+
+PENDIENTE, aparcado por hoy por problemas de cuota de Groq con el
+modelo usado en la síntesis:
+- La versión con estructura de 4 secciones fijas (Introducción /
+  Análisis por Plan / Actividad Operativa / Conclusiones) y límite de
+  2 páginas, validada en notebooks_agents/08_report_template.ipynb,
+  no está aquí todavía -- retomar cuando haya cuota estable.
+- Esta versión no tiene límite de páginas ni estructura fija; el
+  contenido sale tal cual lo escribió el Redactor.
+
+NOTA sobre _limpiar_fuga_razonamiento: cuando el Adaptador (qwen) falla
+al generar salida estructurada, cae a un método de respaldo que a veces
+deja fugas de razonamiento en primera persona SIN las etiquetas
+<think>...</think> que adaptador_en.py sí filtra (ej. "1. Analyze User
+Input: ...") -- detectado en pruebas reales del 27/07. No se modifica
+adaptador_en.py (archivo de otra persona del equipo); este filtro
+adicional vive aquí, aplicado solo al usar draft_en para el documento.
+"""
+
+import os
 import re
-import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Literal, Union
-
-ValorCelda = Union[str, int, float, None]
-
-@dataclass
-class BloqueContenido:
-    """La unidad minima de informacion extraida de un documento."""
-    tipo_bloque: Literal["texto", "tabla"]
-    contenido: Union[str, list[list[ValorCelda]]]
-    etiqueta: str
-    fuente: str
-    formato_origen: str
-    fecha_extraccion: str = field(default_factory=lambda: datetime.now().isoformat())
-
-# --------------------------------------------------------------------
-# PDF
-# --------------------------------------------------------------------
-
-import pdfplumber
-
-def extraer_pdf(ruta: Path) -> list[BloqueContenido]:
-    """Extrae texto y tablas de un PDF, pagina por pagina."""
-    bloques = []
-    with pdfplumber.open(ruta) as pdf:
-        for num_pagina, pagina in enumerate(pdf.pages, start=1):
-            tablas_detectadas = pagina.find_tables()
-            pagina_sin_tablas = pagina
-            for tabla in tablas_detectadas:
-                pagina_sin_tablas = pagina_sin_tablas.outside_bbox(tabla.bbox)
-            texto = pagina_sin_tablas.extract_text() or ""
-            if texto.strip():
-                bloques.append(BloqueContenido(
-                    tipo_bloque="texto",
-                    contenido=texto,
-                    etiqueta=f"{ruta.stem} - pagina {num_pagina}",
-                    fuente=ruta.name,
-                    formato_origen="pdf",
-                ))
-            for tabla in tablas_detectadas:
-                filas = tabla.extract()
-                if filas:
-                    bloques.append(BloqueContenido(
-                        tipo_bloque="tabla",
-                        contenido=filas,
-                        etiqueta=f"{ruta.stem} - pagina {num_pagina}",
-                        fuente=ruta.name,
-                        formato_origen="pdf",
-                    ))
-    return bloques
-
-# --------------------------------------------------------------------
-# Word
-# --------------------------------------------------------------------
 
 from docx import Document
-from docx.table import Table
-from docx.text.paragraph import Paragraph
+from src_agents.models.state import EstadoPipeline  
 
-def _iter_block_items(doc):
-    """Recorre el documento en su orden real, mezclando parrafos y tablas."""
-    for child in doc.element.body.iterchildren():
-        if child.tag.endswith('}p'):
-            yield Paragraph(child, doc)
-        elif child.tag.endswith('}tbl'):
-            yield Table(child, doc)
+NOMBRE_ENTIDAD = os.environ.get("NOMBRE_ENTIDAD", "Ayuntamiento")
 
-def _es_titulo(parrafo) -> bool:
-    """Heuristica: un parrafo corto y en negrita actua como titulo."""
-    if not parrafo.text.strip() or not parrafo.runs:
-        return False
-    return bool(parrafo.runs[0].bold) and len(parrafo.text) < 100
-
-PATRON_CIERRE = re.compile(
-    r"^(Fdo:|Enterada,|Enterado,|Lo que informo|Lo que se comunica)",
-    re.IGNORECASE
+# Patrón de fuga de razonamiento sin <think>: un bloque que empieza con
+# un paso numerado en estilo "plan de trabajo" en inglés (ej.
+# "1. Analyze User Input:", "2. Process Data by Indicator:").
+# Todo lo posterior a la primera coincidencia se descarta -- lo anterior
+# es la traducción real, lo posterior es el modelo pensando en voz alta.
+_PATRON_FUGA_RAZONAMIENTO = re.compile(
+    r"\n?\d+\.\s*\*{0,2}(Analyze|Process|Draft|Task|Identify|Extract)\b",
+    re.IGNORECASE,
 )
 
-def _es_cierre_institucional(texto: str) -> bool:
-    """Detecta parrafos de cierre/firma (ej. 'Fdo:', 'Enterada,') que la
-    heuristica de _es_titulo no distingue de un titulo real -- sin esto,
-    heredan la etiqueta de la ultima seccion vista, rompiendo la
-    trazabilidad de cualquier dato que vaya en ese bloque."""
-    return bool(PATRON_CIERRE.match(texto.strip()))
 
-def _forward_fill_columna_agrupadora(tabla_filas: list[list[str]], indice_columna: int = 0) -> list[list[str]]:
-    """Rellena celdas vacias de UNA columna concreta con el ultimo valor no
-    vacio visto por encima, para reconstruir la columna de agrupacion
-    (ej. MES) cuando una tabla de Word la deja en blanco por continuidad
-    en vez de repetir el valor, como si hiciera Excel con una fusion real.
-    No toca ninguna otra columna: una celda vacia en cualquier otra
-    posicion es un dato ausente genuino, no una continuacion, y se deja
-    tal cual (verificado contra filas TOTAL y datos faltantes reales)."""
-    ultimo_valor = None
-    filas_corregidas = []
-    for fila in tabla_filas:
-        fila = list(fila)
-        valor_actual = fila[indice_columna].strip() if fila[indice_columna] else ""
-        if valor_actual:
-            ultimo_valor = valor_actual
-        elif ultimo_valor is not None:
-            fila[indice_columna] = ultimo_valor
-        filas_corregidas.append(fila)
-    return filas_corregidas
+def _limpiar_fuga_razonamiento(texto: str) -> str:
+    """Corta el texto en el primer indicio de fuga de razonamiento sin
+    <think> (ver nota del módulo). Si no encuentra ninguna, devuelve el
+    texto tal cual -- no modifica nada en el caso normal."""
+    match = _PATRON_FUGA_RAZONAMIENTO.search(texto)
+    if match:
+        return texto[:match.start()].strip()
+    return texto
 
-def extraer_docx(ruta: Path) -> list[BloqueContenido]:
-    """Extrae parrafos y tablas de un Word, en su orden real."""
-    doc = Document(ruta)
-    bloques = []
-    etiqueta_actual = ruta.stem
-    buffer_texto = []
 
-    def volcar_buffer():
-        if buffer_texto:
-            bloques.append(BloqueContenido(
-                tipo_bloque="texto",
-                contenido="\n".join(buffer_texto),
-                etiqueta=etiqueta_actual,
-                fuente=ruta.name,
-                formato_origen="docx",
-            ))
-            buffer_texto.clear()
+def generar_informe_docx(estado: dict, ruta_salida: Path) -> Path:
+    """Genera un .docx a partir del estado del pipeline: borrador en
+    español, traducción al inglés si existe (limpia de fugas de
+    razonamiento), y las incidencias del Revisor como notas de
+    validación al final."""
+    doc = Document()
 
-    for item in _iter_block_items(doc):
-        if isinstance(item, Paragraph):
-            if not item.text.strip():
-                continue
-            if _es_titulo(item):
-                volcar_buffer()
-                etiqueta_actual = item.text.strip().rstrip(":")
-            elif _es_cierre_institucional(item.text):
-                volcar_buffer()
-                etiqueta_actual = "Cierre del documento"
-            else:
-                buffer_texto.append(item.text)
-        else:  # Table
-            volcar_buffer()
-            filas = [[celda.text for celda in fila.cells] for fila in item.rows]
-            filas = _forward_fill_columna_agrupadora(filas, indice_columna=0)
-            bloques.append(BloqueContenido(
-                tipo_bloque="tabla",
-                contenido=filas,
-                etiqueta=etiqueta_actual,
-                fuente=ruta.name,
-                formato_origen="docx",
-            ))
+    doc.add_heading("Memoria Anual de Actividades", level=0)
+    doc.add_heading(NOMBRE_ENTIDAD, level=2)
 
-    volcar_buffer()
-    return bloques
+    doc.add_heading("Informe (Español)", level=1)
+    for parrafo in estado["draft"].split("\n\n"):
+        if parrafo.strip():
+            doc.add_paragraph(parrafo.strip())
 
-# --------------------------------------------------------------------
-# Excel
-# --------------------------------------------------------------------
+    draft_en = estado.get("draft_en", "")
+    if draft_en:
+        draft_en = _limpiar_fuga_razonamiento(draft_en)
+        doc.add_page_break()
+        doc.add_heading("Report (English)", level=1)
+        for parrafo in draft_en.split("\n\n"):
+            if parrafo.strip():
+                doc.add_paragraph(parrafo.strip())
 
-from openpyxl import load_workbook
+    review = estado.get("review")
+    if review is not None and review.incidencias:
+        doc.add_page_break()
+        doc.add_heading("Notas de validación (revisión humana pendiente)", level=1)
+        p = doc.add_paragraph(
+            "El Agente Revisor detectó las siguientes cifras o datos del "
+            "Analista que no aparecen tal cual en el texto redactado. "
+            "Revisar antes de publicar:"
+        )
+        p.runs[0].italic = True
+        for incidencia in review.incidencias:
+            doc.add_paragraph(incidencia, style="List Bullet")
 
-def _propagar_celdas_fusionadas(ws, filas: list) -> list:
-    """Copia el valor de cada celda fusionada a TODAS las celdas que ocupa
-    visualmente. openpyxl solo guarda el valor en la celda superior-
-    izquierda del rango fusionado; el resto llegan vacias (None), lo que
-    rompe la relacion entre una cabecera de grupo (ej. un titulo que cubre
-    varias columnas) y las columnas que describe."""
-    for rango in ws.merged_cells.ranges:
-        valor = ws.cell(row=rango.min_row, column=rango.min_col).value
-        for r in range(rango.min_row, rango.max_row + 1):
-            idx_fila = r - ws.min_row
-            if not (0 <= idx_fila < len(filas)):
-                continue
-            for c in range(rango.min_col, rango.max_col + 1):
-                idx_col = c - ws.min_column
-                if 0 <= idx_col < len(filas[idx_fila]):
-                    filas[idx_fila][idx_col] = valor
-    return filas
+    doc.save(ruta_salida)
+    return ruta_salida
 
-def extraer_xlsx(ruta: Path) -> list[BloqueContenido]:
-    """Extrae cada hoja de un Excel como un bloque de tipo 'tabla', en
-    formato de matriz cruda (sin asumir cual fila es la cabecera).
-
-    NOTA: se carga SIN read_only=True porque ese modo no da acceso a
-    ws.merged_cells - y sin esa informacion no se puede reconstruir
-    correctamente una cabecera de grupo (un titulo que fusiona varias
-    columnas). El coste en memoria es asumible para el tamano de
-    archivo actual."""
-    wb = load_workbook(ruta, data_only=True)
-    bloques = []
-    for nombre_hoja in wb.sheetnames:
-        ws = wb[nombre_hoja]
-        filas = [list(fila) for fila in ws.iter_rows(values_only=True)]
-        filas = _propagar_celdas_fusionadas(ws, filas)
-        filas = [f for f in filas if any(c is not None for c in f)]
-        if not filas:
-            continue
-        bloques.append(BloqueContenido(
-            tipo_bloque="tabla",
-            contenido=filas,
-            etiqueta=nombre_hoja,
-            fuente=ruta.name,
-            formato_origen="xlsx",
-        ))
-    return bloques
-
-# --------------------------------------------------------------------
-# Despachador
-# --------------------------------------------------------------------
-
-EXTRACTORES = {
-    ".pdf": extraer_pdf,
-    ".docx": extraer_docx,
-    ".xlsx": extraer_xlsx,
-}
-
-def extraer_documento(ruta: Path) -> list[BloqueContenido]:
-    """Punto de entrada unico: detecta el formato y llama al extractor."""
-    extension = ruta.suffix.lower()
-    if extension not in EXTRACTORES:
-        raise ValueError(f"Formato no soportado: {extension} ({ruta.name})")
-    return EXTRACTORES[extension](ruta)
-
-def extraer_carpeta(carpeta: Path) -> list[BloqueContenido]:
-    """Extrae todos los documentos soportados de una carpeta."""
-    bloques = []
-    for ruta in sorted(carpeta.iterdir()):
-        if ruta.suffix.lower() in EXTRACTORES:
-            print(f"Procesando: {ruta.name}")
-            bloques.extend(extraer_documento(ruta))
-    return bloques
+def agente_generador_informe(estado: EstadoPipeline) -> dict:
+    """Nodo de LangGraph: genera el .docx final a partir del estado
+    completo y devuelve la ruta en state['final_document']. No llama a
+    ningún LLM -- solo lee draft/draft_en/review ya generados por los
+    nodos anteriores, así que no consume cuota de Groq."""
+    ruta_salida = Path(os.environ.get("OUTPUT_DIR", "data/output")) / "memoria_final.docx"
+    ruta_salida.parent.mkdir(parents=True, exist_ok=True)
+    ruta = generar_informe_docx(estado, ruta_salida)
+    return {"final_document": str(ruta)}
