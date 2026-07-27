@@ -213,6 +213,16 @@ div[data-testid="stDownloadButton"] button:not([kind="primary"]):hover {
 [data-testid="stExpanderDetails"] { background:#FFFFFF !important; }
 [data-testid="stExpander"] svg { fill:currentColor; }
 
+/* --- Sidebar siempre visible, sin posibilidad de colapsarla ------------ */
+[data-testid="stSidebarCollapseButton"] { display:none !important; }
+[data-testid="collapsedControl"] { display:none !important; }
+section[data-testid="stSidebar"] {
+    min-width:320px !important;
+    max-width:320px !important;
+    transform:none !important;
+    visibility:visible !important;
+}
+
 .zona-titulo { font-size:1rem; font-weight:700; color:var(--sanse-text); border-left:4px solid var(--sanse-red); padding-left:.7rem; margin:1.4rem 0 .8rem; }
 hr { border-color: var(--sanse-border) !important; }
 @media (max-width: 768px) {
