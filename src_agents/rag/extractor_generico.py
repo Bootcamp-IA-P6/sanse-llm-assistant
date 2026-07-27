@@ -1,5 +1,6 @@
 """extractor_generico.py - Ingesta generica de documentos."""
 
+import re
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -78,6 +79,18 @@ def _es_titulo(parrafo) -> bool:
         return False
     return bool(parrafo.runs[0].bold) and len(parrafo.text) < 100
 
+PATRON_CIERRE = re.compile(
+    r"^(Fdo:|Enterada,|Enterado,|Lo que informo|Lo que se comunica)",
+    re.IGNORECASE
+)
+
+def _es_cierre_institucional(texto: str) -> bool:
+    """Detecta parrafos de cierre/firma (ej. 'Fdo:', 'Enterada,') que la
+    heuristica de _es_titulo no distingue de un titulo real -- sin esto,
+    heredan la etiqueta de la ultima seccion vista, rompiendo la
+    trazabilidad de cualquier dato que vaya en ese bloque."""
+    return bool(PATRON_CIERRE.match(texto.strip()))
+
 def _forward_fill_columna_agrupadora(tabla_filas: list[list[str]], indice_columna: int = 0) -> list[list[str]]:
     """Rellena celdas vacias de UNA columna concreta con el ultimo valor no
     vacio visto por encima, para reconstruir la columna de agrupacion
@@ -123,6 +136,9 @@ def extraer_docx(ruta: Path) -> list[BloqueContenido]:
             if _es_titulo(item):
                 volcar_buffer()
                 etiqueta_actual = item.text.strip().rstrip(":")
+            elif _es_cierre_institucional(item.text):
+                volcar_buffer()
+                etiqueta_actual = "Cierre del documento"
             else:
                 buffer_texto.append(item.text)
         else:  # Table
