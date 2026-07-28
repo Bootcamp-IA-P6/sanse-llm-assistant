@@ -172,10 +172,13 @@ def _invocar_con_reintento(modelo, prompt, intentos: int = 3):
 def agente_analista(estado: EstadoPipeline) -> dict:
     """Nodo de LangGraph: interpreta state["documents"] (tablas y texto
     narrativo) y devuelve state["analysis"]."""
+    import certifi, httpx
     modelo = ChatGroq(
         model=os.environ.get("GROQ_MODEL_ANALISTA", "llama-3.3-70b-versatile"),
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0,
+        http_client=httpx.Client(verify=certifi.where()),
+        http_async_client=httpx.AsyncClient(verify=certifi.where()),
     )
 
     bloques_tabla = [b for b in estado["documents"] if b.tipo_bloque == "tabla"]

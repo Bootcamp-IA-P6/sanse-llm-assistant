@@ -95,13 +95,14 @@ def agente_redactor(estado: EstadoPipeline) -> dict:
     parrafo por bloque (mismo prompt, mismas reglas), en vez de truncar
     datos y perder cifras del informe final.
     """
+    import certifi, httpx
     modelo = ChatGroq(
         model=os.environ.get("GROQ_MODEL_REDACTOR", "qwen/qwen3.6-27b"),
-        #model="llama-3.3-70b-versatile",
-        #model="llama-3.1-8b-instant",
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.3,
         max_tokens=4000,
+        http_client=httpx.Client(verify=certifi.where()),
+        http_async_client=httpx.AsyncClient(verify=certifi.where()),
     )
     modelo_estructurado = modelo.with_structured_output(ParrafoInforme)
     analisis = estado["analysis"]

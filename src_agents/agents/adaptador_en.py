@@ -76,17 +76,17 @@ def agente_adaptador_en(estado: EstadoPipeline) -> dict:
     en documentos largos o con varios archivos combinados. Ya NO bloquea
     la traduccion si review.valido es False -- ver docstring original."""
 
+    import certifi, httpx
     modelo_id = os.environ.get("GROQ_MODEL_ADAPTADOR", "qwen/qwen3.6-27b")
     kwargs_modelo = dict(
         model=modelo_id,
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.2,
         max_tokens=2000,
+        http_client=httpx.Client(verify=certifi.where()),
+        http_async_client=httpx.AsyncClient(verify=certifi.where()),
     )
     if "qwen" in modelo_id:
-        # reasoning_effort solo lo soportan los modelos "de razonamiento"
-        # como qwen; con modelos de respaldo (ej. llama-3.1-8b-instant)
-        # Groq da error 400 si se lo pasamos.
         kwargs_modelo["reasoning_effort"] = "none"
 
     modelo = ChatGroq(**kwargs_modelo)
