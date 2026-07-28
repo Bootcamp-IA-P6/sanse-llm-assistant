@@ -167,6 +167,8 @@ def validar_memoria(secciones: dict, analisis: Analisis, longitud_max: int = 15)
 # --------------------------------------------------------------------
 # Síntesis (con troceo)
 # --------------------------------------------------------------------
+_CLAVES_ESPERADAS = {"INTRODUCCION", "ANALISIS_PLANES", "ACTIVIDAD_OPERATIVA", "CONCLUSIONES"}
+
 
 def _sintetizar_bloque(modelo, datos_texto_bloque: str, presupuesto_palabras: int) -> dict:
     prompt = _plantilla_memoria.invoke({
@@ -175,22 +177,35 @@ def _sintetizar_bloque(modelo, datos_texto_bloque: str, presupuesto_palabras: in
         "datos": datos_texto_bloque,
     })
     ultimo_error = None
-    for _ in range(3):
+    ultimo_resultado_parcial = {}
+    for intento in range(3):
         try:
             respuesta = modelo.invoke(prompt)
-            return _parsear_memoria(respuesta.content)
+            resultado = _parsear_memoria(respuesta.content)
+            if not _CLAVES_ESPERADAS.issubset(resultado.keys()):
+                faltantes = _CLAVES_ESPERADAS - resultado.keys()
+                print(f"  [generador][debug] intento {intento+1}: faltan {faltantes}")
+                print(f"  [generador][debug] tamaño del bloque de datos: {len(datos_texto_bloque)} caracteres")
+                print(f"  [generador][debug] respuesta cruda:\n{respuesta.content[:800]}\n---")
+                ultimo_error = ValueError(f"Faltan secciones en la respuesta: {faltantes}")
+                ultimo_resultado_parcial = resultado
+                continue
+            return resultado
         except Exception as e:
             ultimo_error = e
-    raise ultimo_error
+
+    print(f"  [generador][aviso] bloque no completó las 4 secciones tras 3 intentos ({ultimo_error}); se usa el resultado parcial")
+    return ultimo_resultado_parcial
 
 
 def sintetizar_memoria(analisis: Analisis, presupuesto_palabras: int = 600) -> dict:
     """Llama a Groq para redactar las 4 secciones. Si no caben en una
     sola llamada, se trocean y se fusionan las secciones parciales."""
     modelo = ChatGroq(
-        model=os.environ.get("GROQ_MODEL_MEMORIA", "llama-3.3-70b-versatile"),
+        model=os.environ.get("GROQ_MODEL_MEMORIA", "openai/gpt-oss-120b"),
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.3,
+        max_tokens=3000,
     )
     analisis_dedup = _deduplicar(analisis)
     datos_texto = _formatear_datos(analisis_dedup)
