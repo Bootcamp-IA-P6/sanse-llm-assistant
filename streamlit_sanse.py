@@ -36,12 +36,20 @@ ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=_C
 # ──────────────────────────────────────────────────────────────────────────
 
 from dotenv import load_dotenv
-# Ruta absoluta al .env en la raíz del proyecto
-load_dotenv(Path(__file__).resolve().parent / ".env")       # si .env está junto a streamlit_sanse.py
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")  # si .env está un nivel arriba
+# Local: carga .env
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import streamlit as st
 from docx import Document as DocxDocument
+
+# Streamlit Cloud: inyecta secrets como variables de entorno
+# (en local no hay st.secrets, por lo que el bloque es silencioso)
+for _k in ["GROQ_API_KEY", "GROQ_MODEL_ADAPTADOR", "GROQ_MODEL_REDACTOR", "GROQ_MODEL_MEMORIA"]:
+    if _k not in os.environ:
+        try:
+            os.environ[_k] = st.secrets[_k]
+        except Exception:
+            pass
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
