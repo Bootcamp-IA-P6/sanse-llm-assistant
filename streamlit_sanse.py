@@ -18,18 +18,30 @@ Basado en streamlit_prueba.py, con correcciones de accesibilidad/UX:
 
 import base64
 import io
+import os
+import ssl
 import sys
 import tempfile
 import time
 from pathlib import Path
 
-import streamlit as st
-from docx import Document as DocxDocument
+# ── Fix SSL corporativo ────────────────────────────────────────────────────
+# Parcha el contexto SSL de Python a nivel global para que TODA conexión
+# HTTPS (httpx, requests, aiohttp…) use certifi en vez del store corporativo.
+import certifi
+_CERTIFI = certifi.where()
+os.environ["SSL_CERT_FILE"]      = _CERTIFI
+os.environ["REQUESTS_CA_BUNDLE"] = _CERTIFI
+ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=_CERTIFI)
+# ──────────────────────────────────────────────────────────────────────────
 
 from dotenv import load_dotenv
-load_dotenv()
+# Ruta absoluta al .env en la raíz del proyecto
+load_dotenv(Path(__file__).resolve().parent / ".env")       # si .env está junto a streamlit_sanse.py
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")  # si .env está un nivel arriba
 
-# -- Ruta raíz al path para importar src_agents.*
+import streamlit as st
+from docx import Document as DocxDocument
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
