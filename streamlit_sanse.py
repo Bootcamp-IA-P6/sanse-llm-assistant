@@ -9,15 +9,32 @@ Basado en streamlit_prueba.py, con correcciones de accesibilidad/UX:
    o texto amarillo sobre fondo amarillo.
 2. El botón "quitar archivo" de cada fichero subido queda más separado del
    nombre del fichero.
-3. El botón de descarga secundario (.txt) fuerza su propio contraste, en vez
-   de heredar los colores por defecto de Streamlit.
-4. La generación del informe muestra un st.status con spinner y va
-   actualizando la fase del pipeline en curso (ingesta, análisis, redacción,
-   revisión, traducción), en vez de un spinner mudo sin detalle.
+3. La generación del informe muestra un st.status con spinner y va
+   actualizando la fase del pipeline en curso (ingesta, análisis, generación
+   del informe final), en vez de un spinner mudo sin detalle.
+
+Actualizado (27/07) para el pipeline simplificado a 3 nodos
+(ingesta -> analista -> generador -> END): el generador ya no vuelca
+state["draft"]/state["draft_en"]/state["review"] (esos campos ya no
+existen) -- sintetiza su propia memoria de 4 secciones desde
+state["analysis"] y escribe el .docx final en state["final_document"].
+Esta interfaz ahora lee ese archivo real en vez de reconstruir uno
+propio. Se retira también el botón de descarga en .txt (decisión de
+equipo, 27/07) -- el generador no produce esa versión.
+
+Actualizado (27/07, tarde) tras inspeccionar el DOM real con las
+herramientas de desarrollador del navegador:
+- El botón de "Seleccionar archivos" y el de borrar cada archivo se
+  identifican ahora por su data-testid real (stBaseButton-secondary /
+  stBaseButton-borderlessIcon para el de subir, stBaseButton-minimal
+  dentro de stFileChipDeleteBtn para el de borrar) en vez de un
+  :not(...) que no funcionaba porque ese atributo estaba en un
+  elemento distinto al botón.
+- Se fuerza visible el control nativo para volver a abrir el lateral
+  (stSidebarCollapsedControl), porque seguía oculto al ocultar la
+  cabecera completa (header stHeader).
 """
 
-import base64
-import io
 import sys
 import tempfile
 import time
@@ -38,53 +55,16 @@ from src_agents.graph.workflow import pipeline
 
 # ---------------------------------------------------------------------------
 # Fases del pipeline (para mostrar progreso real durante la generación)
+# Actualizado: el grafo ahora solo tiene 3 nodos (ingesta, analista,
+# generador) -- redactor/revisor/adaptador ya no son nodos del grafo.
 # ---------------------------------------------------------------------------
 FASES_PIPELINE = {
     "ingesta": "📥 Leyendo y extrayendo los documentos…",
     "analista": "🔎 Interpretando los datos…",
-    "redactor": "✍️ Redactando el informe…",
-    "revisor": "🔍 Revisando y validando las cifras…",
-    "adaptador": "🌐 Traduciendo el informe al inglés…",
+    "generador": "📝 Sintetizando y traduciendo la memoria…",
 }
 
-
-# ---------------------------------------------------------------------------
-# Helper — construir .docx en memoria (español + inglés + incidencias)
-# ---------------------------------------------------------------------------
-def _construir_docx(draft_es: str, draft_en: str, incidencias: list[str]) -> bytes:
-    doc = DocxDocument()
-    doc.add_heading("Memoria Anual de Actividades", level=0)
-    doc.add_paragraph(
-        "Departamento de Desarrollo Local y Empleo\n"
-        "Ayuntamiento de San Sebastián de los Reyes\n"
-        "Generado por el Asistente IA · Factoría F5"
-    )
-    doc.add_page_break()
-
-    doc.add_heading("Informe (Español)", level=1)
-    doc.add_paragraph(draft_es)
-
-    if draft_en:
-        doc.add_page_break()
-        doc.add_heading("Report (English)", level=1)
-        doc.add_paragraph(draft_en)
-
-    if incidencias:
-        doc.add_page_break()
-        doc.add_heading("Notas de validación (revisión humana)", level=1)
-        nota = doc.add_paragraph()
-        nota.add_run(
-            "Estos datos no se han encontrado literalmente en el texto generado. "
-            "No bloquea el informe — queda para revisión humana:"
-        ).italic = True
-        for inc in incidencias:
-            doc.add_paragraph(inc, style="List Bullet")
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.read()
-
+import base64
 
 # ---------------------------------------------------------------------------
 # Configuración de página
@@ -132,6 +112,14 @@ html, body, .stApp {
     color: var(--sanse-text);
 }
 header[data-testid="stHeader"], #MainMenu, footer { display: none !important; }
+/* El control nativo para volver a abrir el lateral vive dentro de la
+   cabecera (stHeader). Al ocultar la cabecera entera arriba, se perdía
+   también este botón. Se fuerza visible aquí para no perder la única
+   forma de recuperar el lateral si se pliega. */
+[data-testid="stSidebarCollapsedControl"] {
+    visibility: visible !important;
+    display: block !important;
+}
 .block-container { padding-top: 0 !important; }
 .sanse-header {
     display: flex;
@@ -160,10 +148,49 @@ section[data-testid="stSidebar"] hr { border-color: var(--sanse-border) !importa
 [data-testid="stFileUploaderDropzoneInstructions"] > div > span::before { visibility:visible; display:block; height:auto; content:"Arrastra y suelta los archivos aquí"; font-weight:600; font-size:.95rem; color:var(--sanse-text) !important; }
 [data-testid="stFileUploaderDropzoneInstructions"] > div > small { visibility:hidden; display:block; height:0; }
 [data-testid="stFileUploaderDropzoneInstructions"] > div > small::before { visibility:visible; display:block; height:auto; content:"Límite 200 MB por archivo  •  PDF, DOCX, XLSX"; font-size:.82rem; color:var(--sanse-muted) !important; }
-[data-testid="stFileUploaderDropzone"] button { background:var(--sanse-red) !important; color:white !important; border:none !important; border-radius:var(--radius) !important; font-weight:600 !important; font-size:0 !important; padding:.5rem 1.2rem !important; }
-[data-testid="stFileUploaderDropzone"] button { gap:.9rem !important; }
-[data-testid="stFileUploaderDropzone"] button::before { content:"Seleccionar archivos"; font-size:.85rem; font-weight:600; color:white; margin-right:.9rem; }
-[data-testid="stFileUploaderDropzone"] button:hover { background:var(--sanse-red-dk) !important; }
+
+/* Botón de subir/añadir archivos (versión inicial "Upload" y versión
+   compacta "+" que aparece cuando ya hay archivos). Se identifican por
+   su data-testid real, comprobado con el inspector del navegador --
+   antes se intentaba excluir el botón de borrar con :not(...), pero
+   ese atributo estaba en el <small> que lo envuelve, no en el <button>,
+   así que nunca se excluía nada. */
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"],
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-borderlessIcon"] {
+    background: var(--sanse-red) !important;
+    border: none !important;
+    border-radius: var(--radius) !important;
+    padding: .5rem 1.2rem !important;
+}
+/* Oculta TODO el contenido interno original del botón (icono "+" y el
+   texto "Upload"), en vez de font-size:0 -- ese truco no bastaba
+   porque Streamlit reasigna su propio tamaño de letra al <p> interno,
+   más específico que el heredado del botón, y el "Upload" se colaba. */
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] *,
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-borderlessIcon"] * {
+    display: none !important;
+}
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"]::after,
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-borderlessIcon"]::after {
+    content: "Seleccionar archivos";
+    font-size: .85rem;
+    font-weight: 600;
+    color: white;
+}
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"]:hover,
+[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-borderlessIcon"]:hover {
+    background: var(--sanse-red-dk) !important;
+}
+
+/* Botón de borrar archivo (la X): queda pequeño y transparente, sin el
+   fondo rojo ni el texto "Seleccionar archivos" superpuesto -- ahora
+   se apunta directamente al botón real (stBaseButton-minimal) dentro
+   de su envoltorio (stFileChipDeleteBtn), no al envoltorio en sí. */
+[data-testid="stFileChipDeleteBtn"] [data-testid="stBaseButton-minimal"] {
+    background: transparent !important;
+    border: none !important;
+    padding: .2rem !important;
+}
 
 /* Separación entre el botón "Seleccionar archivos" y la lista de archivos ya subidos */
 [data-testid="stFileChips"] { margin-top:1.1rem !important; }
@@ -213,16 +240,8 @@ div[data-testid="stDownloadButton"] button:not([kind="primary"]):hover {
 [data-testid="stExpanderDetails"] { background:#FFFFFF !important; }
 [data-testid="stExpander"] svg { fill:currentColor; }
 
-/* --- Sidebar siempre visible, sin posibilidad de colapsarla ------------ */
-[data-testid="stSidebarCollapseButton"] { display:none !important; }
-[data-testid="collapsedControl"] { display:none !important; }
-section[data-testid="stSidebar"] {
-    min-width:320px !important;
-    max-width:320px !important;
-    transform:none !important;
-    visibility:visible !important;
-}
-
+/* --- Sidebar: visible por defecto (initial_sidebar_state="expanded"
+   arriba), sin ocultar sus controles nativos de plegar/reabrir. */
 .zona-titulo { font-size:1rem; font-weight:700; color:var(--sanse-text); border-left:4px solid var(--sanse-red); padding-left:.7rem; margin:1.4rem 0 .8rem; }
 hr { border-color: var(--sanse-border) !important; }
 @media (max-width: 768px) {
@@ -250,9 +269,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Sidebar — sin selectores de modelo/temperatura/secciones (no aplican al
-# pipeline nuevo: el modelo es una decisión interna, no del usuario, y el
-# pipeline siempre genera el informe completo en español + inglés).
+# Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(_LOGO_HTML, unsafe_allow_html=True)
@@ -260,8 +277,8 @@ with st.sidebar:
     st.markdown("### ℹ️ Cómo funciona")
     st.caption(
         "El sistema procesa tus documentos en varios pasos automáticos: "
-        "lectura, interpretación de datos, redacción, revisión y traducción. "
-        "El resultado se genera en español e inglés."
+        "lectura, interpretación de datos, y generación de la memoria final "
+        "en español e inglés."
     )
     st.divider()
     st.caption("Proyecto pedagógico · Factoría F5 & Ayuntamiento Sanse · 2026")
@@ -300,7 +317,8 @@ with generar_col:
     )
 
 # ---------------------------------------------------------------------------
-# Pipeline de generación (nuevo: src_agents.graph.workflow.pipeline)
+# Pipeline de generación (src_agents.graph.workflow.pipeline — 3 nodos:
+# ingesta -> analista -> generador -> END)
 # ---------------------------------------------------------------------------
 if boton_generar:
     # 1. Guardar los archivos subidos en una carpeta temporal — el agente
@@ -314,8 +332,7 @@ if boton_generar:
         status_carga.update(label=f"✅ {len(archivos_subidos)} documento(s) listo(s)", state="complete")
 
     # 2. Ejecutar el pipeline completo, mostrando la fase en curso a medida
-    #    que cada agente del grafo (ingesta/analista/redactor/revisor/
-    #    adaptador) termina su trabajo — en vez de un spinner mudo.
+    #    que cada agente del grafo (ingesta/analista/generador) termina.
     resultado = {}
     t0 = time.time()
     with st.status("⏳ Generando el informe…", expanded=True) as status_pipeline:
@@ -337,72 +354,84 @@ if boton_generar:
             st.error(f"Error generando el informe: {exc}")
             st.stop()
 
-    draft_es = resultado.get("draft", "")
-    draft_en = resultado.get("draft_en", "")
-    review = resultado.get("review")
-    incidencias = review.incidencias if review else []
-
+    ruta_final = resultado.get("final_document")
     st.session_state["resultado_pipeline"] = {
-        "draft_es": draft_es,
-        "draft_en": draft_en,
-        "incidencias": incidencias,
+        "ruta_final": ruta_final,
         "elapsed": elapsed,
     }
 
 if "resultado_pipeline" in st.session_state:
     datos = st.session_state["resultado_pipeline"]
-    draft_es = datos["draft_es"]
-    draft_en = datos["draft_en"]
-    incidencias = datos["incidencias"]
+    ruta_final = datos["ruta_final"]
     elapsed = datos["elapsed"]
 
-    # 3. Mostrar resultado
+    # 3. Mostrar resultado — se lee el .docx real que dejó el generador en
+    #    state["final_document"], no un draft/draft_en que ya no existe.
     st.markdown("---")
     st.markdown('<p class="zona-titulo">📝 Informe generado</p>', unsafe_allow_html=True)
 
-    badge = (
-        '<span class="badge-ok">✔ Validado</span>' if not incidencias
-        else f'<span class="badge-warn">⚠ {len(incidencias)} incidencia(s)</span>'
-    )
-    st.markdown(f"""
-    <div class="section-card">
-        <h3>Informe (Español) &nbsp; {badge}</h3>
-        <p style="color:#555;font-size:.82rem">⏱ {elapsed:.1f}s</p>
-        <p>{draft_es.replace(chr(10), "<br>")}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    if ruta_final and Path(ruta_final).exists():
+        doc_final = DocxDocument(ruta_final)
 
-    if draft_en:
+        # Separamos el documento en 3 bloques (español / inglés /
+        # incidencias) usando el estilo de párrafo que ya trae el propio
+        # Word ("Title", "Heading 1"...) -- no hace falta volver a
+        # analizar el texto, report_generator.py ya los distingue así:
+        # doc.add_heading(nivel=0) -> "Title", nivel=1 -> "Heading 1".
+        bloques_es, bloques_en, bloques_incidencias = [], [], []
+        zona_actual = "es"
+        for p in doc_final.paragraphs:
+            if not p.text.strip():
+                continue
+            estilo = p.style.name if p.style else ""
+            if estilo == "Title" and "English" in p.text:
+                zona_actual = "en"
+            elif estilo == "Heading 1" and "validaci" in p.text.lower():
+                zona_actual = "incidencias"
+            {"es": bloques_es, "en": bloques_en, "incidencias": bloques_incidencias}[zona_actual].append((estilo, p.text))
+
+        def _render_bloques(bloques):
+            html = ""
+            for estilo, texto in bloques:
+                if estilo == "Title":
+                    html += f'<h3 style="color:var(--sanse-red);margin-top:1.1rem;">{texto}</h3>'
+                elif estilo in ("Heading 1", "Heading 2"):
+                    html += f'<h4 style="margin-top:.9rem;margin-bottom:.3rem;">{texto}</h4>'
+                else:
+                    html += f'<p>{texto}</p>'
+            return html
+
         st.markdown(f"""
         <div class="section-card">
-            <h3>Report (English)</h3>
-            <p>{draft_en.replace(chr(10), "<br>")}</p>
+            <h3>Memoria generada (español) &nbsp; <span class="badge-ok">✔ Generado en {elapsed:.1f}s</span></h3>
+            {_render_bloques(bloques_es)}
         </div>
         """, unsafe_allow_html=True)
 
-    if incidencias:
-        with st.expander(f"⚠️ {len(incidencias)} incidencia(s) para revisión humana"):
-            for inc in incidencias:
-                st.warning(inc)
+        if bloques_en:
+            st.markdown(f"""
+            <div class="section-card">
+                {_render_bloques(bloques_en)}
+            </div>
+            """, unsafe_allow_html=True)
 
-    # 4. Descarga
-    st.divider()
-    st.markdown('<p class="zona-titulo">💾 Descargar resultado</p>', unsafe_allow_html=True)
-    docx_buffer = _construir_docx(draft_es, draft_en, incidencias)
-    col_dl1, col_dl2, _ = st.columns([1, 1, 2])
-    with col_dl1:
-        st.download_button(
-            label="📥 Descargar .docx",
-            data=docx_buffer,
-            file_name="memoria_anual_sanse.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            type="primary",
-        )
-    with col_dl2:
-        texto_plano = f"INFORME (ESPAÑOL)\n\n{draft_es}\n\n\nREPORT (ENGLISH)\n\n{draft_en}"
-        st.download_button(
-            label="📥 Descargar .txt",
-            data=texto_plano.encode("utf-8"),
-            file_name="memoria_anual_sanse.txt",
-            mime="text/plain",
-        )
+        if bloques_incidencias:
+            with st.expander("⚠️ Notas de validación — revisar antes de aprobar", expanded=True):
+                st.markdown(_render_bloques(bloques_incidencias), unsafe_allow_html=True)
+
+        # 4. Descarga — un único botón, con el archivo real generado.
+        #    (Se retira el botón .txt: el generador no produce esa versión.)
+        st.divider()
+        st.markdown('<p class="zona-titulo">💾 Descargar resultado</p>', unsafe_allow_html=True)
+        docx_bytes = Path(ruta_final).read_bytes()
+        col_dl1, _ = st.columns([1, 3])
+        with col_dl1:
+            st.download_button(
+                label="📥 Descargar .docx",
+                data=docx_bytes,
+                file_name="memoria_anual_sanse.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                type="primary",
+            )
+    else:
+        st.error("No se ha encontrado el documento generado. Revisa la consola para más detalle.")
