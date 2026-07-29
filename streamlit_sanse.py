@@ -305,6 +305,15 @@ with st.sidebar:
     if _key_from_secrets:
         # Streamlit Cloud: clave configurada en el dashboard, no mostrar nada
         st.success("✅ Clave configurada.")
+        if st.checkbox("Usar una clave diferente", key="override_key"):
+            _override = st.text_input(
+                "Tu clave de Groq:",
+                type="password",
+                placeholder="gsk_...",
+                help="Sobreescribe la clave por defecto. Obtenla en console.groq.com",
+            )
+            if _override:
+                os.environ["GROQ_API_KEY"] = _override
     elif os.environ.get("GROQ_API_KEY"):
         # Local con .env: clave cargada, no mostrar el valor
         st.success("✅ Clave cargada desde configuración.")
