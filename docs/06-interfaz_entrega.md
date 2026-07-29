@@ -186,6 +186,12 @@ La app estará disponible en **http://localhost:8507**.
 docker run --rm -p 8507:8507 --env-file .env sanse-llm-assistant:latest
 ```
 
+> **Sin `.env`** también funciona — el sidebar muestra un campo para introducir la clave de Groq directamente en la interfaz. Útil para compartir la imagen sin configuración previa:
+> ```bash
+> docker run --rm -p 8507:8507 palomagom/sanse-llm-assistant:latest
+> ```
+> Al abrir http://localhost:8507 aparece el campo **🔑 API Key de Groq** en el panel lateral. El botón *Generar Memoria* permanece deshabilitado hasta que se introduce una clave válida.
+
 ### Subir a Docker Hub
 
 ```bash
@@ -211,7 +217,7 @@ Para MVP con un solo servicio, `docker run --env-file .env` es suficiente. Si en
 
 | Archivo | Descripción |
 |---|---|
-| `streamlit_sanse.py` | Interfaz Streamlit principal |
+| `streamlit_sanse.py` | Interfaz Streamlit principal — incluye campo de API Key en sidebar |
 | `Dockerfile` | Imagen Docker basada en Python 3.12-slim |
 | `docker-compose.yml` | Orquestación local con `.env` |
 | `.dockerignore` | Excluye `.venv`, `.env`, notebooks y datos raw |
