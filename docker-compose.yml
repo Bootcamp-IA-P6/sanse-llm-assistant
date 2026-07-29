@@ -1,0 +1,12 @@
+services:
+  sanse-app:
+    build: .
+    image: sanse-llm-assistant:latest
+    ports:
+      - "8507:8507"
+    env_file:
+      - .env
+    volumes:
+      # Permite editar código sin reconstruir la imagen durante desarrollo
+      - .:/app
+    restart: unless-stopped
