@@ -113,7 +113,7 @@ st.set_page_config(
     page_title="Asistente Memoria Anual · Sanse",
     page_icon="🏛️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded",   # siempre abierto al cargar
 )
 
 # ---------------------------------------------------------------------------
@@ -151,27 +151,42 @@ html, body, .stApp {
     background: #FFFFFF;
     color: var(--sanse-text);
 }
-#MainMenu, footer { display: none !important; }
-/* Header oculto completamente — el botón de sidebar lo gestiona nuestro propio botón flotante */
-header[data-testid="stHeader"] {
-    background: transparent !important;
-    border-bottom: none !important;
-    box-shadow: none !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    overflow: visible !important;
+
+/* ── Oculta el menú de 3 puntos y el pie de página de Streamlit ── */
+#MainMenu { visibility: hidden; }
+footer    { visibility: hidden; }
+
+/* ── SIDEBAR ANCLADO: elimina TODOS los botones y gestos de cierre ── */
+/* Botón '<<' dentro del sidebar */
+[data-testid="stSidebarCollapseButton"],
+button[data-testid="stSidebarCollapseButton"],
+/* Botón '>' flotante (cuando el sidebar ya está cerrado) */
+[data-testid="collapsedControl"],
+button[data-testid="collapsedControl"],
+/* Overlay oscuro que aparece en móvil al abrir el sidebar */
+[data-testid="stSidebarOverlay"] {
+    display: none !important;
+}
+/* Bloquea el gesto de swipe en móvil desactivando pointer-events en el overlay */
+[data-testid="stSidebarOverlay"] {
     pointer-events: none !important;
 }
 
+/* ── Estilo del sidebar ── */
+section[data-testid="stSidebar"] {
+    background:   var(--sanse-gray)   !important;
+    border-right: 2px solid var(--sanse-border) !important;
+}
+
+/* ── Layout y espaciado ── */
 .block-container {
-    padding-top: 0.5rem !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
+    padding-top: 1.2rem !important;
+    padding-left: 1.4rem !important;
+    padding-right: 1.4rem !important;
+    max-width: 100% !important;
 }
-/* Sidebar con margen superior para que no quede tapado por nuestro botón */
-section[data-testid="stSidebar"] > div:first-child {
-    padding-top: 3.2rem !important;
-}
+
+/* ── Cabecera ── */
 .sanse-header {
     display: flex;
     align-items: center;
@@ -183,16 +198,19 @@ section[data-testid="stSidebar"] > div:first-child {
 }
 .sanse-header-text h1 { font-size:1.35rem; font-weight:700; color:var(--sanse-text); margin:0 0 2px; }
 .sanse-header-text p  { font-size:.82rem; color:var(--sanse-muted); margin:0; }
-section[data-testid="stSidebar"] { background: var(--sanse-gray) !important; border-right: 1px solid var(--sanse-border); }
+
+/* ── Sidebar interior ── */
 section[data-testid="stSidebar"] * { color: var(--sanse-text) !important; }
 section[data-testid="stSidebar"] h3 { color: var(--sanse-red) !important; font-weight:700; font-size:.95rem; text-transform:uppercase; letter-spacing:.05em; }
 section[data-testid="stSidebar"] hr { border-color: var(--sanse-border) !important; }
+
+/* ── Cards ── */
 .section-card { background:white; border:1px solid var(--sanse-border); border-top:4px solid var(--sanse-red); border-radius:var(--radius); padding:1.2rem 1.6rem; margin-bottom:1.2rem; box-shadow:0 1px 4px rgba(0,0,0,.06); }
 .section-card h3 { color:var(--sanse-red); margin-top:0; font-size:1rem; }
-.badge-ok   { background:var(--sanse-ok);   color:white; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:600; }
-.badge-warn { background:var(--sanse-warn);  color:white; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:600; }
+.badge-ok   { background:var(--sanse-ok);  color:white; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:600; }
+.badge-warn { background:var(--sanse-warn); color:white; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:600; }
 
-/* --- Subida de archivos ------------------------------------------------ */
+/* ── Subida de archivos ── */
 [data-testid="stFileUploaderDropzone"] { background:white !important; border:2px dashed var(--sanse-border) !important; border-radius:var(--radius) !important; }
 [data-testid="stFileUploaderDropzone"] * { color:var(--sanse-text) !important; }
 [data-testid="stFileUploaderDropzoneInstructions"] > div > span { visibility:hidden; display:block; height:0; }
@@ -200,80 +218,69 @@ section[data-testid="stSidebar"] hr { border-color: var(--sanse-border) !importa
 [data-testid="stFileUploaderDropzoneInstructions"] > div > small { visibility:hidden; display:block; height:0; }
 [data-testid="stFileUploaderDropzoneInstructions"] > div > small::before { visibility:visible; display:block; height:auto; content:"Límite 200 MB por archivo  •  PDF, DOCX, XLSX"; font-size:.82rem; color:var(--sanse-muted) !important; }
 [data-testid="stFileUploaderDropzone"] button { background:var(--sanse-red) !important; color:white !important; border:none !important; border-radius:var(--radius) !important; font-weight:600 !important; font-size:0 !important; padding:.5rem 1.2rem !important; }
-[data-testid="stFileUploaderDropzone"] button { gap:.9rem !important; }
 [data-testid="stFileUploaderDropzone"] button::before { content:"Seleccionar archivos"; font-size:.85rem; font-weight:600; color:white; margin-right:.9rem; }
 [data-testid="stFileUploaderDropzone"] button:hover { background:var(--sanse-red-dk) !important; }
-
-/* Separación entre el botón "Seleccionar archivos" y la lista de archivos ya subidos */
 [data-testid="stFileChips"] { margin-top:1.1rem !important; }
-
-/* Fila de cada archivo ya subido: separar el icono de quitar y explicar qué hace */
 [data-testid="stFileChip"] { background:#FFFFFF !important; border:1px solid var(--sanse-border) !important; border-radius:var(--radius) !important; padding-right:.4rem !important; margin-bottom:.5rem !important; }
 [data-testid="stFileChip"] * { color:var(--sanse-text) !important; }
-[data-testid="stFileChipDeleteBtn"] { margin-left:1rem !important; position:relative; }
+[data-testid="stFileChipDeleteBtn"] { margin-left:1rem !important; }
 [data-testid="stFileChipDeleteBtn"] svg { color:var(--sanse-muted) !important; fill:currentColor !important; }
 [data-testid="stFileChipDeleteBtn"]:hover svg { color:var(--sanse-red) !important; }
 
-/* --- Botones ------------------------------------------------------------ */
+/* ── Botones ── */
 div.stButton > button[kind="primary"] { background:var(--sanse-red) !important; color:white !important; border:none !important; border-radius:3px !important; padding:.65rem 2.4rem !important; font-weight:700 !important; font-size:.95rem !important; letter-spacing:.08em !important; text-transform:uppercase !important; transition:background .2s, box-shadow .2s; box-shadow:0 2px 6px rgba(163,19,47,.30) !important; }
 div.stButton > button[kind="primary"]:hover { background:var(--sanse-red-dk) !important; box-shadow:0 4px 12px rgba(163,19,47,.40) !important; }
 div.stButton > button:not([kind="primary"]),
-div[data-testid="stDownloadButton"] button:not([kind="primary"]) {
-    background:#FFFFFF !important;
-    color:var(--sanse-red-dk) !important;
-    border:2px solid var(--sanse-red) !important;
-    border-radius:3px !important;
-    font-weight:700 !important;
-    padding:.6rem 2rem !important;
-}
-div.stButton > button:not([kind="primary"]) *,
-div[data-testid="stDownloadButton"] button:not([kind="primary"]) * { color:inherit !important; }
-div.stButton > button:not([kind="primary"]):hover,
-div[data-testid="stDownloadButton"] button:not([kind="primary"]):hover {
-    background:var(--sanse-red-lt) !important;
-    border-color:var(--sanse-red-dk) !important;
-}
+div[data-testid="stDownloadButton"] button:not([kind="primary"]) { background:#FFFFFF !important; color:var(--sanse-red-dk) !important; border:2px solid var(--sanse-red) !important; border-radius:3px !important; font-weight:700 !important; padding:.6rem 2rem !important; }
+div.stButton > button:not([kind="primary"]) *, div[data-testid="stDownloadButton"] button:not([kind="primary"]) * { color:inherit !important; }
+div.stButton > button:not([kind="primary"]):hover, div[data-testid="stDownloadButton"] button:not([kind="primary"]):hover { background:var(--sanse-red-lt) !important; border-color:var(--sanse-red-dk) !important; }
 
-/* --- Alertas (st.info / st.warning / st.error) — contraste garantizado -- */
+/* ── Alertas ── */
 [data-testid="stAlertContainer"] { border-radius:var(--radius) !important; }
-[data-testid="stAlertContentInfo"] { background:var(--sanse-red-lt) !important; border-left:4px solid var(--sanse-red) !important; }
+[data-testid="stAlertContentInfo"]    { background:var(--sanse-red-lt) !important; border-left:4px solid var(--sanse-red) !important; }
 [data-testid="stAlertContentWarning"] { background:#FFF3CD !important; border-left:4px solid var(--sanse-warn) !important; }
-[data-testid="stAlertContentError"] { background:#F8D7DA !important; border-left:4px solid #B02A37 !important; }
+[data-testid="stAlertContentError"]   { background:#F8D7DA !important; border-left:4px solid #B02A37 !important; }
 [data-testid="stAlertContentSuccess"] { background:#D1E7DD !important; border-left:4px solid var(--sanse-ok) !important; }
-[data-testid="stAlertContentInfo"], [data-testid="stAlertContentInfo"] * { color:var(--sanse-text) !important; }
+[data-testid="stAlertContentInfo"],    [data-testid="stAlertContentInfo"] *    { color:var(--sanse-text) !important; }
 [data-testid="stAlertContentWarning"], [data-testid="stAlertContentWarning"] * { color:#664D03 !important; }
-[data-testid="stAlertContentError"], [data-testid="stAlertContentError"] * { color:#58151C !important; }
+[data-testid="stAlertContentError"],   [data-testid="stAlertContentError"] *   { color:#58151C !important; }
 [data-testid="stAlertContentSuccess"], [data-testid="stAlertContentSuccess"] * { color:#0A3622 !important; }
 [data-testid="stAlertContentInfo"] svg, [data-testid="stAlertContentWarning"] svg,
 [data-testid="stAlertContentError"] svg, [data-testid="stAlertContentSuccess"] svg { fill:currentColor !important; }
 
-/* --- Expander / st.status (incidencias y progreso del pipeline) -------- */
+/* ── Expander / status ── */
 [data-testid="stExpander"] { background:#FFFFFF !important; border:1px solid var(--sanse-border) !important; border-radius:var(--radius) !important; color:var(--sanse-text) !important; }
 [data-testid="stExpanderDetails"] { background:#FFFFFF !important; }
 [data-testid="stExpander"] svg { fill:currentColor; }
 
+/* ── API Key input ── */
+section[data-testid="stSidebar"] input[type="password"] {
+    background-color: #FFFFFF !important; color: #1A1A1A !important;
+    border: 1px solid #E0E0E0 !important; border-radius: 6px !important;
+}
+section[data-testid="stSidebar"] input:-webkit-autofill,
+section[data-testid="stSidebar"] input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0px 1000px #FFFFFF inset !important;
+    -webkit-text-fill-color: #1A1A1A !important;
+}
+
 .zona-titulo { font-size:1rem; font-weight:700; color:var(--sanse-text); border-left:4px solid var(--sanse-red); padding-left:.7rem; margin:1.4rem 0 .8rem; }
 hr { border-color: var(--sanse-border) !important; }
+
+/* ── Responsivo móvil ── */
 @media (max-width: 768px) {
-    .sanse-header { flex-direction:column; align-items:flex-start; gap:.6rem; padding:.7rem .9rem .7rem 3.2rem; }
+    .sanse-header { flex-direction:column; align-items:flex-start; gap:.6rem; padding:.7rem 1rem; }
     .sanse-header img { height:40px !important; }
     .sanse-header-text h1 { font-size:1rem; }
-    .sanse-header-text p { font-size:.75rem; }
-    .block-container { padding-left:.5rem !important; padding-right:.5rem !important; padding-top:0.5rem !important; }
+    .sanse-header-text p  { font-size:.75rem; }
+    .block-container { padding-left:.6rem !important; padding-right:.6rem !important; }
+    section[data-testid="stSidebar"] { min-width: 100% !important; max-width: 100% !important; }
     [data-testid="column"] { width:100% !important; flex:1 1 100% !important; min-width:100% !important; }
     div.stButton > button[kind="primary"] { width:100% !important; font-size:.85rem !important; padding:.6rem 1rem !important; }
     div[data-testid="stDownloadButton"] button { width:100% !important; }
     .section-card { padding:.7rem .8rem; }
-    .section-card h3 { font-size:.9rem; }
-    [data-testid="stFileUploaderDropzone"] { padding:.7rem !important; }
-    /* Columnas de descarga: apilar en móvil */
-    [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: .5rem !important; }
-    [data-testid="stHorizontalBlock"] > [data-testid="column"] { min-width: 100% !important; }
-    /* Status cards */
-    [data-testid="stStatusWidget"] { font-size:.82rem; }
-    /* Expander */
-    [data-testid="stExpander"] summary { font-size:.85rem; }
-    /* Zona titulo */
+    [data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; gap:.5rem !important; }
+    [data-testid="stHorizontalBlock"] > [data-testid="column"] { min-width:100% !important; }
     .zona-titulo { font-size:.9rem; }
 }
 @media (max-width: 480px) {
@@ -282,126 +289,6 @@ hr { border-color: var(--sanse-border) !important; }
     div.stButton > button[kind="primary"] { font-size:.8rem !important; padding:.55rem .8rem !important; }
 }
 </style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------------------------
-# Botón flotante PROPIO para abrir/cerrar sidebar — siempre visible
-# No depende del botón nativo de Streamlit (que puede desaparecer).
-# Usa JS para detectar el estado real del sidebar en el DOM y hacer click
-# en el botón nativo, o bien colapsar/expandir directamente el elemento.
-# ---------------------------------------------------------------------------
-st.markdown("""
-<button id="sanse-sidebar-toggle"
-  onclick="toggleSanseSidebar()"
-  title="Abrir / cerrar panel lateral"
-  aria-label="Abrir o cerrar el panel lateral">
-  <svg id="sanse-icon-open"  width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-  <svg id="sanse-icon-close" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-</button>
-<style>
-#sanse-sidebar-toggle {
-  position: fixed;
-  top: 0.65rem;
-  left: 0.65rem;
-  z-index: 99999;
-  background: #A3132F;
-  border: none;
-  border-radius: 7px;
-  width: 2.4rem;
-  height: 2.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(163,19,47,.45);
-  transition: background .18s, box-shadow .18s, transform .12s;
-  padding: 0;
-}
-#sanse-sidebar-toggle:hover {
-  background: #7D0E22;
-  box-shadow: 0 4px 16px rgba(163,19,47,.55);
-  transform: scale(1.07);
-}
-#sanse-sidebar-toggle:active { transform: scale(.96); }
-</style>
-<script>
-(function() {
-  function isSidebarOpen() {
-    var sb = window.parent.document.querySelector('[data-testid="stSidebar"]');
-    if (!sb) return false;
-    // Streamlit marca el sidebar colapsado con aria-expanded="false" o con una clase/atributo
-    var collapsed = sb.getAttribute('aria-expanded');
-    if (collapsed !== null) return collapsed !== 'false';
-    // Fallback: comprobar si tiene ancho visible
-    return sb.offsetWidth > 60;
-  }
-
-  function clickNativeToggle() {
-    var doc = window.parent.document;
-    // Intentar todos los selectores conocidos del botón nativo
-    var selectors = [
-      '[data-testid="collapsedControl"]',
-      '[data-testid="stSidebarCollapsedControl"]',
-      'button[kind="header"]',
-      'header button',
-      '[data-testid="stHeader"] button',
-    ];
-    for (var i = 0; i < selectors.length; i++) {
-      var btn = doc.querySelector(selectors[i]);
-      if (btn) { btn.click(); return true; }
-    }
-    return false;
-  }
-
-  function forceSidebarToggle() {
-    var doc = window.parent.document;
-    var sb = doc.querySelector('[data-testid="stSidebar"]');
-    if (!sb) return;
-    if (isSidebarOpen()) {
-      sb.style.display = 'none';
-      sb.setAttribute('aria-expanded', 'false');
-    } else {
-      sb.style.display = '';
-      sb.removeAttribute('aria-expanded');
-      // Forzar re-render
-      sb.style.transform = 'translateX(0)';
-    }
-  }
-
-  window.toggleSanseSidebar = function() {
-    var open = isSidebarOpen();
-    // Primero intentar el botón nativo de Streamlit
-    var clicked = clickNativeToggle();
-    // Si no encontramos botón nativo, forzar directamente
-    if (!clicked) forceSidebarToggle();
-    // Actualizar iconos del botón propio
-    setTimeout(function() {
-      var nowOpen = isSidebarOpen();
-      document.getElementById('sanse-icon-open').style.display  = nowOpen ? 'none' : '';
-      document.getElementById('sanse-icon-close').style.display = nowOpen ? ''     : 'none';
-    }, 200);
-  };
-
-  // Sincronizar icono al cargar y al cambiar tamaño
-  function syncIcon() {
-    var open = isSidebarOpen();
-    var btnOpen  = document.getElementById('sanse-icon-open');
-    var btnClose = document.getElementById('sanse-icon-close');
-    if (btnOpen && btnClose) {
-      btnOpen.style.display  = open ? 'none' : '';
-      btnClose.style.display = open ? ''     : 'none';
-    }
-  }
-  // Esperar a que el DOM de Streamlit esté listo
-  var tries = 0;
-  var interval = setInterval(function() {
-    syncIcon();
-    tries++;
-    if (tries > 20) clearInterval(interval);
-  }, 300);
-  window.addEventListener('resize', syncIcon);
-})();
-</script>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
@@ -435,21 +322,6 @@ with st.sidebar:
 
     # ── API Key ───────────────────────────────────────────────────────────
     st.markdown("### 🔑 API Key de Groq")
-    st.markdown("""
-    <style>
-    section[data-testid="stSidebar"] input[type="password"] {
-        background-color: #FFFFFF !important;
-        color: #1A1A1A !important;
-        border: 1px solid #E0E0E0 !important;
-        border-radius: 6px !important;
-    }
-    section[data-testid="stSidebar"] input:-webkit-autofill,
-    section[data-testid="stSidebar"] input:-webkit-autofill:focus {
-        -webkit-box-shadow: 0 0 0px 1000px #FFFFFF inset !important;
-        -webkit-text-fill-color: #1A1A1A !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
     # ¿La clave viene de st.secrets (Streamlit Cloud)?
     _key_from_secrets = False
