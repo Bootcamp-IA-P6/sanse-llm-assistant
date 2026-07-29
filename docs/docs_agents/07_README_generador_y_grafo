@@ -1,0 +1,46 @@
+# Resumen para el equipo
+
+**Rama:** `fix/report-generator-content` (desde `dev`, PR abierto y actualizado)
+**Notebook:** `notebooks_agents/09_analyst_narrative_text.ipynb`
+**Estado:** código completo y comitado; pendiente de validar con ejecución completa de los 3 documentos
+
+## 1. Agente Analista extendido a texto narrativo
+
+Hasta ahora solo procesaba `tipo_bloque == "tabla"`. Se añadió una segunda vía (`PROMPT_TEXTO`, `_parsear_respuesta_texto`) para extraer cifras incrustadas en prosa (ej. *"1.396 personas"* en un párrafo, no en una tabla). Validado: 27 conceptos de un bloque narrativo, `SIN_DATOS` correcto en párrafos sin cifras, 107 conceptos totales combinando tabla + texto en un documento real.
+
+## 2. Generador de informe: versión final — síntesis de 4 secciones
+
+Se probó primero la versión simple (volcado de `draft`/`draft_en` del Redactor) y se dio por buena en un primer momento, pero **se revirtió**: la versión definitiva sintetiza su propia versión estructurada en 4 secciones (Introducción, Análisis por Plan, Actividad Operativa, Conclusiones) **directamente desde `state["analysis"]`**, siguiendo la plantilla real del Ayuntamiento — no usa `state["draft"]` en absoluto.
+
+Incluye:
+- Deduplicación de `ConceptoValor` antes de sintetizar (se detectaron datasets con más de la mitad de valores duplicados).
+- Troceo de los datos en bloques de 2.000 caracteres si no caben en una sola llamada — soluciona el error 413 que salía con modelos de cuota reducida.
+- `NOMBRE_ENTIDAD` como variable de entorno, no hardcodeado.
+- **Filtro de fuga de razonamiento** (`_limpiar_fuga_razonamiento`): detectado un caso real donde una llamada de traducción dejaba un plan de pasos en inglés sin las etiquetas `<think>`. Filtro propio, aplicado sin tocar archivos de compañeras.
+
+## 3. La traducción reutiliza `agente_adaptador_en`, no una implementación propia
+
+A sugerencia de una compañera: en vez de una función de traducción nueva, el Generador llama a `agente_adaptador_en` (su Adaptador ya construido y validado) **como función directa**, una vez por cada una de las 4 secciones. Motivos: más resistente a fallos (reintento + fallback con limpieza de `<think>`, la versión propia solo dejaba `[Translation failed: ...]` sin plan B), ya resuelto el problema de compatibilidad con modelos de repuesto (`reasoning_effort` solo aplica a `qwen`), y evita mantener dos piezas de código haciendo lo mismo.
+
+**Importante:** `agente_adaptador_en` **no es un nodo del grafo** — se ejecuta como función normal dentro de `report_generator.py`, porque hace falta llamarlo 4 veces (una por sección) con textos distintos, y un nodo de LangGraph solo se ejecuta una vez por turno. Sigue haciendo el trabajo real de traducción, solo que no aparece como caja independiente en `workflow.py`.
+
+## 4. Arquitectura final del grafo: simplificado a 3 nodos
+
+```
+ingesta → analista → generador → END
+```
+
+**Redactor y Revisor se quitaron del grafo principal.** El Generador final no usa `draft`, `draft_en` ni `review` — nunca los necesitó, y mantenerlos en la cadena solo gastaba cuota de Groq sin que nadie usara su resultado (se detectó que con los 3 documentos juntos el Redactor necesitaba 26 llamadas). Su código sigue existiendo y es válido, solo no forma parte de esta cadena.
+
+
+## Validación pendiente
+
+No se ha logrado todavía una ejecución completa con los 3 documentos reales juntos usando esta arquitectura final (3 nodos + Adaptador interno). Debería ser más barata en cuota que los intentos anteriores, al no pasar por Redactor ni Revisor.
+
+## Pendiente / a vigilar
+
+- Ejecución completa de los 3 documentos con el pipeline simplificado, sin cortes.
+- Confirmar con el equipo el cambio de arquitectura antes de fusionar el PR.
+- Formato del docx: sigue sin ajustarse de forma fiable a 2 páginas.
+- Variantes técnica/ejecutiva (solo hay traducción ES/EN, no diferenciación de audiencia).
+- Streamlit sigue sin conectar al pipeline nuevo (hallazgo de otra compañera, pendiente aparte).
