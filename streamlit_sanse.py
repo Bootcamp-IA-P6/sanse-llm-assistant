@@ -274,6 +274,25 @@ with st.sidebar:
         "El resultado se genera en español e inglés."
     )
     st.divider()
+
+    # ── API Key (para Docker y uso sin .env) ─────────────────────────────
+    st.markdown("### 🔑 API Key de Groq")
+    _key_from_env = os.environ.get("GROQ_API_KEY", "")
+    _user_api_key = st.text_input(
+        "Introduce tu clave de Groq:",
+        value=_key_from_env,
+        type="password",
+        placeholder="gsk_...",
+        help="Obtenla en console.groq.com · Necesaria para generar el informe.",
+    )
+    # La clave introducida tiene prioridad sobre el .env
+    if _user_api_key:
+        os.environ["GROQ_API_KEY"] = _user_api_key
+    if not os.environ.get("GROQ_API_KEY"):
+        st.warning("Introduce tu API Key para poder generar el informe.")
+    # ─────────────────────────────────────────────────────────────────────
+
+    st.divider()
     st.caption("Proyecto pedagógico · Factoría F5 & Ayuntamiento Sanse · 2026")
 
 # ---------------------------------------------------------------------------
@@ -306,7 +325,7 @@ with generar_col:
     boton_generar = st.button(
         "Generar Memoria",
         type="primary",
-        disabled=not archivos_subidos,
+        disabled=not archivos_subidos or not os.environ.get("GROQ_API_KEY"),
     )
 
 # ---------------------------------------------------------------------------

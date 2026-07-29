@@ -118,6 +118,8 @@ GROQ_MODEL_REDACTOR=openai/gpt-oss-120b
 GROQ_MODEL_MEMORIA=openai/gpt-oss-120b
 ```
 
+> Si no hay `.env` (por ejemplo al correr la imagen Docker), el sidebar muestra un campo de texto donde el usuario puede introducir su clave directamente. La clave introducida en el campo tiene prioridad sobre el `.env`.
+
 ---
 
 ## Despliegue en Streamlit Cloud
