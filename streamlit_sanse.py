@@ -151,8 +151,27 @@ html, body, .stApp {
     background: #FFFFFF;
     color: var(--sanse-text);
 }
-header[data-testid="stHeader"], #MainMenu, footer { display: none !important; }
-.block-container { padding-top: 0 !important; }
+#MainMenu, footer { display: none !important; }
+/* Header oculto completamente — el botón de sidebar lo gestiona nuestro propio botón flotante */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    pointer-events: none !important;
+}
+
+.block-container {
+    padding-top: 0.5rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+}
+/* Sidebar con margen superior para que no quede tapado por nuestro botón */
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 3.2rem !important;
+}
 .sanse-header {
     display: flex;
     align-items: center;
@@ -236,14 +255,153 @@ div[data-testid="stDownloadButton"] button:not([kind="primary"]):hover {
 .zona-titulo { font-size:1rem; font-weight:700; color:var(--sanse-text); border-left:4px solid var(--sanse-red); padding-left:.7rem; margin:1.4rem 0 .8rem; }
 hr { border-color: var(--sanse-border) !important; }
 @media (max-width: 768px) {
-    .sanse-header { flex-direction:column; align-items:flex-start; gap:.8rem; padding:.8rem 1rem; }
-    .sanse-header-text h1 { font-size:1.1rem; }
-    .block-container { padding-left:.8rem !important; padding-right:.8rem !important; }
+    .sanse-header { flex-direction:column; align-items:flex-start; gap:.6rem; padding:.7rem .9rem .7rem 3.2rem; }
+    .sanse-header img { height:40px !important; }
+    .sanse-header-text h1 { font-size:1rem; }
+    .sanse-header-text p { font-size:.75rem; }
+    .block-container { padding-left:.5rem !important; padding-right:.5rem !important; padding-top:0.5rem !important; }
     [data-testid="column"] { width:100% !important; flex:1 1 100% !important; min-width:100% !important; }
-    div.stButton > button[kind="primary"] { width:100% !important; }
-    .section-card { padding:.9rem 1rem; }
+    div.stButton > button[kind="primary"] { width:100% !important; font-size:.85rem !important; padding:.6rem 1rem !important; }
+    div[data-testid="stDownloadButton"] button { width:100% !important; }
+    .section-card { padding:.7rem .8rem; }
+    .section-card h3 { font-size:.9rem; }
+    [data-testid="stFileUploaderDropzone"] { padding:.7rem !important; }
+    /* Columnas de descarga: apilar en móvil */
+    [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: .5rem !important; }
+    [data-testid="stHorizontalBlock"] > [data-testid="column"] { min-width: 100% !important; }
+    /* Status cards */
+    [data-testid="stStatusWidget"] { font-size:.82rem; }
+    /* Expander */
+    [data-testid="stExpander"] summary { font-size:.85rem; }
+    /* Zona titulo */
+    .zona-titulo { font-size:.9rem; }
+}
+@media (max-width: 480px) {
+    .sanse-header-text h1 { font-size:.9rem; }
+    .sanse-header img { height:34px !important; }
+    div.stButton > button[kind="primary"] { font-size:.8rem !important; padding:.55rem .8rem !important; }
 }
 </style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Botón flotante PROPIO para abrir/cerrar sidebar — siempre visible
+# No depende del botón nativo de Streamlit (que puede desaparecer).
+# Usa JS para detectar el estado real del sidebar en el DOM y hacer click
+# en el botón nativo, o bien colapsar/expandir directamente el elemento.
+# ---------------------------------------------------------------------------
+st.markdown("""
+<button id="sanse-sidebar-toggle"
+  onclick="toggleSanseSidebar()"
+  title="Abrir / cerrar panel lateral"
+  aria-label="Abrir o cerrar el panel lateral">
+  <svg id="sanse-icon-open"  width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  <svg id="sanse-icon-close" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+</button>
+<style>
+#sanse-sidebar-toggle {
+  position: fixed;
+  top: 0.65rem;
+  left: 0.65rem;
+  z-index: 99999;
+  background: #A3132F;
+  border: none;
+  border-radius: 7px;
+  width: 2.4rem;
+  height: 2.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(163,19,47,.45);
+  transition: background .18s, box-shadow .18s, transform .12s;
+  padding: 0;
+}
+#sanse-sidebar-toggle:hover {
+  background: #7D0E22;
+  box-shadow: 0 4px 16px rgba(163,19,47,.55);
+  transform: scale(1.07);
+}
+#sanse-sidebar-toggle:active { transform: scale(.96); }
+</style>
+<script>
+(function() {
+  function isSidebarOpen() {
+    var sb = window.parent.document.querySelector('[data-testid="stSidebar"]');
+    if (!sb) return false;
+    // Streamlit marca el sidebar colapsado con aria-expanded="false" o con una clase/atributo
+    var collapsed = sb.getAttribute('aria-expanded');
+    if (collapsed !== null) return collapsed !== 'false';
+    // Fallback: comprobar si tiene ancho visible
+    return sb.offsetWidth > 60;
+  }
+
+  function clickNativeToggle() {
+    var doc = window.parent.document;
+    // Intentar todos los selectores conocidos del botón nativo
+    var selectors = [
+      '[data-testid="collapsedControl"]',
+      '[data-testid="stSidebarCollapsedControl"]',
+      'button[kind="header"]',
+      'header button',
+      '[data-testid="stHeader"] button',
+    ];
+    for (var i = 0; i < selectors.length; i++) {
+      var btn = doc.querySelector(selectors[i]);
+      if (btn) { btn.click(); return true; }
+    }
+    return false;
+  }
+
+  function forceSidebarToggle() {
+    var doc = window.parent.document;
+    var sb = doc.querySelector('[data-testid="stSidebar"]');
+    if (!sb) return;
+    if (isSidebarOpen()) {
+      sb.style.display = 'none';
+      sb.setAttribute('aria-expanded', 'false');
+    } else {
+      sb.style.display = '';
+      sb.removeAttribute('aria-expanded');
+      // Forzar re-render
+      sb.style.transform = 'translateX(0)';
+    }
+  }
+
+  window.toggleSanseSidebar = function() {
+    var open = isSidebarOpen();
+    // Primero intentar el botón nativo de Streamlit
+    var clicked = clickNativeToggle();
+    // Si no encontramos botón nativo, forzar directamente
+    if (!clicked) forceSidebarToggle();
+    // Actualizar iconos del botón propio
+    setTimeout(function() {
+      var nowOpen = isSidebarOpen();
+      document.getElementById('sanse-icon-open').style.display  = nowOpen ? 'none' : '';
+      document.getElementById('sanse-icon-close').style.display = nowOpen ? ''     : 'none';
+    }, 200);
+  };
+
+  // Sincronizar icono al cargar y al cambiar tamaño
+  function syncIcon() {
+    var open = isSidebarOpen();
+    var btnOpen  = document.getElementById('sanse-icon-open');
+    var btnClose = document.getElementById('sanse-icon-close');
+    if (btnOpen && btnClose) {
+      btnOpen.style.display  = open ? 'none' : '';
+      btnClose.style.display = open ? ''     : 'none';
+    }
+  }
+  // Esperar a que el DOM de Streamlit esté listo
+  var tries = 0;
+  var interval = setInterval(function() {
+    syncIcon();
+    tries++;
+    if (tries > 20) clearInterval(interval);
+  }, 300);
+  window.addEventListener('resize', syncIcon);
+})();
+</script>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
