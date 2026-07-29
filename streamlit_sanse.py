@@ -275,21 +275,51 @@ with st.sidebar:
     )
     st.divider()
 
-    # ── API Key (para Docker y uso sin .env) ─────────────────────────────
+    # ── API Key ───────────────────────────────────────────────────────────
     st.markdown("### 🔑 API Key de Groq")
-    _key_from_env = os.environ.get("GROQ_API_KEY", "")
-    _user_api_key = st.text_input(
-        "Introduce tu clave de Groq:",
-        value=_key_from_env,
-        type="password",
-        placeholder="gsk_...",
-        help="Obtenla en console.groq.com · Necesaria para generar el informe.",
-    )
-    # La clave introducida tiene prioridad sobre el .env
-    if _user_api_key:
-        os.environ["GROQ_API_KEY"] = _user_api_key
-    if not os.environ.get("GROQ_API_KEY"):
-        st.warning("Introduce tu API Key para poder generar el informe.")
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"] input[type="password"] {
+        background-color: #FFFFFF !important;
+        color: #1A1A1A !important;
+        border: 1px solid #E0E0E0 !important;
+        border-radius: 6px !important;
+    }
+    section[data-testid="stSidebar"] input:-webkit-autofill,
+    section[data-testid="stSidebar"] input:-webkit-autofill:focus {
+        -webkit-box-shadow: 0 0 0px 1000px #FFFFFF inset !important;
+        -webkit-text-fill-color: #1A1A1A !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ¿La clave viene de st.secrets (Streamlit Cloud)?
+    _key_from_secrets = False
+    try:
+        if st.secrets.get("GROQ_API_KEY"):
+            os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+            _key_from_secrets = True
+    except Exception:
+        pass
+
+    if _key_from_secrets:
+        # Streamlit Cloud: clave configurada en el dashboard, no mostrar nada
+        st.success("✅ Clave configurada.")
+    elif os.environ.get("GROQ_API_KEY"):
+        # Local con .env: clave cargada, no mostrar el valor
+        st.success("✅ Clave cargada desde configuración.")
+    else:
+        # Docker sin --env-file, o cualquier entorno sin clave: pedir al usuario
+        _user_api_key = st.text_input(
+            "Introduce tu clave de Groq:",
+            type="password",
+            placeholder="gsk_...",
+            help="Obtenla en console.groq.com · Necesaria para generar el informe.",
+        )
+        if _user_api_key:
+            os.environ["GROQ_API_KEY"] = _user_api_key
+        else:
+            st.warning("Introduce tu API Key para poder generar el informe.")
     # ─────────────────────────────────────────────────────────────────────
 
     st.divider()
