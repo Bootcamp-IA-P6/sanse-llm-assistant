@@ -15,8 +15,10 @@ ENV/
 uv.lock
 uv.toml
 
-# Archivos de configuración local
+# Archivos de configuración local — NUNCA subir al repo
 .env
+.env.*
+.streamlit/secrets.toml
 config/local.yaml
 
 # Datos
