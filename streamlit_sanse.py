@@ -39,6 +39,27 @@ from dotenv import load_dotenv
 # Local: carga .env
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+import logging
+
+# ── Filtro de seguridad: censura la API Key en cualquier log o traceback ──
+class _SanitizeKeyFilter(logging.Filter):
+    """Sustituye cualquier aparición de la API Key por '***' en los logs."""
+    def filter(self, record):
+        key = os.environ.get("GROQ_API_KEY", "")
+        if key and len(key) > 8:
+            msg = record.getMessage()
+            if key in msg:
+                record.msg = record.msg.replace(key, "gsk_***REDACTED***")
+                record.args = ()
+        return True
+
+_key_filter = _SanitizeKeyFilter()
+logging.getLogger().addFilter(_key_filter)
+# Aplicar también a los loggers de httpx y groq (que pueden loguear headers)
+for _logger_name in ("httpx", "groq", "openai", "httpcore"):
+    logging.getLogger(_logger_name).addFilter(_key_filter)
+# ─────────────────────────────────────────────────────────────────────────
+
 import streamlit as st
 from docx import Document as DocxDocument
 
